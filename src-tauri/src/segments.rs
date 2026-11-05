@@ -15,6 +15,9 @@ use crate::library::{self, EpisodeLookup};
 use crate::AppState;
 
 const API: &str = "https://api.theintrodb.org/v4/media";
+/// Version of [`Segments`]; older ones are downloaded again. 2 = length of the release,
+/// credits starting at 0 dropped.
+const VERSION: u32 = 2;
 /// Found times are asked again after this long, as the community corrects them.
 const FOUND_MAX_AGE: u64 = 60 * 24 * 3600;
 /// An episode without times is asked again sooner, as new submissions keep coming.
@@ -42,6 +45,10 @@ pub struct Segments {
     pub preview: Vec<Span>,
     /// Unix timestamp of the download; the times may be empty (none submitted yet).
     pub fetched: u64,
+    /// Length in seconds of the release the times were submitted for (0 = unknown).
+    pub length: f64,
+    /// [`VERSION`] of these times.
+    pub version: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Default, PartialEq, Debug)]
@@ -57,7 +64,38 @@ impl Segments {
         !(self.intro.is_empty() && self.recap.is_empty() && self.credits.is_empty() && self.preview.is_empty())
     }
 
+    /// Intro or recap parts worth a jump, by their start.
+    pub fn openers<'a>(spans: &'a [Span]) -> impl Iterator<Item = (f64, f64)> + 'a {
+        spans.iter().filter_map(|s| s.end.map(|end| (s.start, end))).filter(|(start, end)| end - start >= MIN_SKIP)
+    }
+
+    /// The end credits in a file of `length` seconds (0 = unknown): where they start and where
+    /// the playback can go on after them (with a preview right after them; infinity = the
+    /// end of the file). In a longer or shorter release of the episode the credits keep their
+    /// distance from the end. The last credits in the second half count (an episode can have
+    /// opening credits too).
+    pub fn end_credits(&self, length: f64) -> Option<(f64, f64)> {
+        let shift = if self.length > 0.0 && length > 0.0 { length - self.length } else { 0.0 };
+        let at_end = |span: &Span| Span { start: span.start + shift, end: span.end.map(|e| e + shift) };
+        let end_of = |span: &Span| span.end.unwrap_or(f64::INFINITY);
+        let credits = self
+            .credits
+            .iter()
+            .filter(|s| s.start > 0.0)
+            .map(at_end)
+            .filter(|s| length <= 0.0 || (s.start >= length * 0.5 && s.start < length))
+            .max_by(|a, b| a.start.total_cmp(&b.start))?;
+        let mut end = end_of(&credits);
+        if let Some(preview) = self.preview.iter().map(at_end).find(|p| (p.start - end).abs() <= 3.0) {
+            end = end_of(&preview);
+        }
+        Some((credits.start, end))
+    }
+
     pub fn stale(&self) -> bool {
+        if self.version < VERSION {
+            return true;
+        }
         let max_age = if self.found() { FOUND_MAX_AGE } else { MISSING_MAX_AGE };
         db::now().saturating_sub(self.fetched) > max_age
     }
@@ -83,32 +121,13 @@ impl Plan {
         let Some(segments) = segments else {
             return plan;
         };
-        let end_of = |span: &Span| span.end.unwrap_or(f64::INFINITY);
         if settings.skip_intro {
-            plan.skip = segments
-                .recap
-                .iter()
-                .chain(&segments.intro)
-                .filter_map(|s| s.end.map(|end| (s.start, end)))
-                .filter(|(start, end)| end - start >= MIN_SKIP)
-                .collect();
+            plan.skip = Segments::openers(&segments.recap).chain(Segments::openers(&segments.intro)).collect();
             plan.skip.sort_by(|a, b| a.0.total_cmp(&b.0));
         }
         if settings.skip_credits {
-            // The end credits: the last credits in the second half (a movie-like episode can
-            // have opening credits too).
-            let credits = segments
-                .credits
-                .iter()
-                .filter(|s| length <= 0.0 || s.start >= length * 0.5)
-                .max_by(|a, b| a.start.total_cmp(&b.start));
-            if let Some(credits) = credits {
-                // A preview right after the credits goes too.
-                let mut end = end_of(credits);
-                if let Some(preview) = segments.preview.iter().find(|p| (p.start - end).abs() <= 3.0) {
-                    end = end_of(preview);
-                }
-                plan.credits = Some(credits.start);
+            if let Some((start, end)) = segments.end_credits(length) {
+                plan.credits = Some(start);
                 // Only a real scene after the credits is worth staying for.
                 plan.after_credits = (end.is_finite() && (length <= 0.0 || end < length - 10.0)).then_some(end);
             }
@@ -141,7 +160,9 @@ pub fn fetch(tmdb_id: u64, season: u32, episode: u32, length: f64, timeout: Dura
         .set("Accept", "application/json")
         .query("tmdb_id", &tmdb_id.to_string())
         .query("season", &season.to_string())
-        .query("episode", &episode.to_string());
+        .query("episode", &episode.to_string())
+        // Adds the length of the release the times belong to.
+        .query("details", "true");
     if length > 0.0 {
         request = request.query("duration_ms", &((length * 1000.0) as u64).to_string());
     }
@@ -335,7 +356,8 @@ pub fn fetch_show(app: &AppHandle, show_id: u64) -> Result<ShowResult, String> {
 
 fn parse(json: &Value) -> Segments {
     // Intro and recap: start null = from the beginning; credits and preview: end null = to
-    // the end of the file. 0/0 marks a part confirmed absent.
+    // the end of the file. 0/0 marks a part confirmed absent, and so does credits or a
+    // preview starting at 0 (the API's documentation).
     let spans = |key: &str, open_start: bool| -> Vec<Span> {
         let mut spans: Vec<Span> = json[key]
             .as_array()
@@ -345,6 +367,7 @@ fn parse(json: &Value) -> Segments {
             .filter_map(|s| {
                 let ms = |v: &Value| v.as_f64().map(|ms| ms / 1000.0);
                 let start = match ms(&s["start_ms"]) {
+                    Some(start) if start <= 0.0 && !open_start => return None,
                     Some(start) => start,
                     None if open_start => 0.0,
                     None => return None,
@@ -366,6 +389,8 @@ fn parse(json: &Value) -> Segments {
         credits: spans("credits", false),
         preview: spans("preview", false),
         fetched: db::now(),
+        length: json["group_duration_ms"].as_f64().map_or(0.0, |ms| ms / 1000.0),
+        version: VERSION,
     }
 }
 
@@ -384,13 +409,21 @@ mod tests {
             "intro": [{ "start_ms": null, "end_ms": 23000 }, { "start_ms": 0, "end_ms": 0 }],
             "recap": [{ "start_ms": 25000, "end_ms": 134000 }],
             "credits": [{ "start_ms": 2500000, "end_ms": null }],
+            "preview": [{ "start_ms": 0, "end_ms": null }],
+            "group_duration_ms": 2600000,
         }));
         assert_eq!(s.intro, vec![Span { start: 0.0, end: Some(23.0) }]);
         assert_eq!(s.recap, vec![Span { start: 25.0, end: Some(134.0) }]);
         assert_eq!(s.credits, vec![Span { start: 2500.0, end: None }]);
         assert!(s.preview.is_empty());
-        assert!(s.found());
+        assert_eq!(s.length, 2600.0);
+        assert!(s.found() && s.end_credits(0.0).is_some() && !s.stale());
         assert!(!parse(&Value::Null).found());
+        // Credits "from 0 to the end" mean none.
+        let s = parse(&json!({ "credits": [{ "start_ms": 0, "end_ms": null }] }));
+        assert!(!s.found() && s.end_credits(0.0).is_none());
+        // Times stored by version 1.7.0 are downloaded again.
+        assert!(Segments { fetched: db::now(), ..Segments::default() }.stale());
     }
 
     #[test]
@@ -409,6 +442,20 @@ mod tests {
 
         let plan = Plan::new(&settings(false, false), Some(&segments), 2600.0);
         assert!(plan.skip.is_empty() && plan.credits.is_none() && plan.autoplay);
+    }
+
+    #[test]
+    fn plan_moves_the_credits_with_the_end_of_a_longer_release() {
+        let segments = Segments {
+            credits: vec![Span { start: 1500.0, end: None }, Span { start: 0.0, end: None }],
+            length: 1560.0,
+            ..Segments::default()
+        };
+        let plan = Plan::new(&settings(false, true), Some(&segments), 1660.0);
+        assert_eq!((plan.credits, plan.after_credits), (Some(1600.0), None));
+        // Unknown release length: the times are used as they are.
+        let plan = Plan::new(&settings(false, true), Some(&Segments { length: 0.0, ..segments }), 1660.0);
+        assert_eq!(plan.credits, Some(1500.0));
     }
 
     #[test]

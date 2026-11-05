@@ -1026,7 +1026,7 @@ const segmentsProgress = new Map();
 /** The show page panel: how many episodes have times, and the download button. */
 function skipPanelHtml(s) {
   const asked = s.episodes.filter((e) => e.skipTimes);
-  const found = asked.filter((e) => e.skipTimes.intro || e.skipTimes.credits).length;
+  const found = asked.filter(hasSkipTimes).length;
   const running = segmentsProgress.get(s.id);
   const set = state.settings;
   const enabled = set && (set.skipIntro || (set.skipCredits && !IS_ANDROID));
@@ -1112,12 +1112,31 @@ function upcomingShows() {
     .sort((a, b) => a.nextEpisode.airDate.localeCompare(b.nextEpisode.airDate) || byTitle(a, b));
 }
 
-/** "⏭ intro, titulky" when TheIntroDB has times for the episode. */
-function skipTimesLabel(e) {
-  const times = e.skipTimes;
-  if (!times || !(times.intro || times.credits)) return null;
-  const parts = [times.intro ? t('intro') : null, times.credits ? t('titulky') : null].filter(Boolean);
-  return `<span title="${t('Časy z TheIntroDB')}">⏭ ${parts.join(', ')}</span>`;
+const SKIP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6v12l8.5-6zM13.5 6v12l8.5-6z"/></svg>';
+
+/** Episode has intro, recap or credits times from TheIntroDB. */
+const hasSkipTimes = (e) => !!(e.skipTimes && (e.skipTimes.intro || e.skipTimes.recap || e.skipTimes.credits));
+
+/** Chips with the intro, recap and credits times of an episode (from TheIntroDB). */
+function skipTimesHtml(e) {
+  if (!hasSkipTimes(e)) return '';
+  const { intro, recap, credits, afterCredits } = e.skipTimes;
+  const set = state.settings || {};
+  const range = ([from, to]) => `${fmtTime(from)}–${fmtTime(to)}`;
+  const chip = (label, time, on, title) => `
+    <span class="skip-chip ${on ? '' : 'off'}" title="${esc(title)}">${SKIP_ICON}${label} <b>${time}</b></span>`;
+  const introTitle = set.skipIntro ? t('Přeskočí se (časy z TheIntroDB).') : t('Přeskakování intra je vypnuté v Nastavení (časy z TheIntroDB).');
+  const creditsOn = set.skipCredits && !IS_ANDROID;
+  const creditsTitle = !creditsOn
+    ? t('Přeskakování titulků je vypnuté v Nastavení (časy z TheIntroDB).')
+    : afterCredits
+      ? t('Přeskočí se, přehrávání pokračuje scénou po titulcích (časy z TheIntroDB).')
+      : t('Epizoda tu skončí (časy z TheIntroDB).');
+  return `<span class="skip-times">${[
+    recap ? chip(t('rekapitulace'), range(recap), set.skipIntro, introTitle) : '',
+    intro ? chip(t('intro'), range(intro), set.skipIntro, introTitle) : '',
+    credits ? chip(t('titulky'), afterCredits ? range([credits, afterCredits]) : t('od {time}', { time: fmtTime(credits) }), creditsOn, creditsTitle) : '',
+  ].join('')}</span>`;
 }
 
 function episodeRow(e) {
@@ -1129,7 +1148,6 @@ function episodeRow(e) {
     fmtSize(e.size),
     e.position > 0 ? `<span class="accent">${fmtTime(e.position)}${e.duration ? ` / ${fmtTime(e.duration)}` : ''}</span>` : null,
     e.watched ? `<span class="ok">✓ ${t('Zhlédnuto')}</span>` : null,
-    skipTimesLabel(e),
   ].filter(Boolean).join(' · ');
   const canPlay = e.available && !e.playing;
   return `
@@ -1137,7 +1155,7 @@ function episodeRow(e) {
       <div class="ep-num">${e.lastEpisode ? `${e.episode}–${e.lastEpisode}` : e.episode}</div>
       <div class="ep-main">
         <div class="ep-title" title="${esc(e.fileName)}">${esc(e.title)}${e.playing ? `<span class="ep-live">${t('Přehrává se')}</span>` : ''}</div>
-        <div class="ep-meta">${meta}</div>
+        <div class="ep-meta">${meta}${skipTimesHtml(e)}</div>
         ${e.overview ? `<div class="ep-overview">${esc(e.overview)}</div>` : ''}
         ${pct > 0 ? `<div class="progress big"><div style="width:${pct}%"></div></div>` : ''}
       </div>

@@ -627,6 +627,17 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .ep-meta { font-size: 12px; color: var(--text-3); margin-top: 1px; }
 .ep-meta .accent { color: var(--accent); font-weight: 600; }
 .ep-meta .ok { color: var(--ok); }
+/* Intro, recap and credits times from TheIntroDB. */
+.skip-times { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 8px; vertical-align: 1px; }
+.skip-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0 7px 0 5px; border-radius: 999px;
+  font-size: 11px; line-height: 17px; color: var(--live); background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.22); white-space: nowrap; cursor: default;
+}
+.skip-chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.skip-chip svg { width: 10px; height: 10px; fill: currentColor; stroke: none; flex: none; }
+.skip-chip.off { color: var(--text-3); background: transparent; border-color: var(--line); }
+.compact .skip-times { display: flex; margin: 4px 0 0; }
 .ep-overview {
   margin-top: 4px;
   font-size: 12.5px;

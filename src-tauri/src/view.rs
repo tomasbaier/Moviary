@@ -9,6 +9,7 @@ use crate::db::{self, Db, Person, Record, SeasonMeta};
 use crate::library::{self, ScanState};
 use crate::media::{self, ExternalSubtitle, MediaInfo, Tags};
 use crate::scanner;
+use crate::segments::Segments;
 use crate::tracks::{self, AudioSelection, Resolved, Source, SubtitleSelection, TrackChoice};
 use crate::AppState;
 
@@ -78,12 +79,17 @@ pub struct Movie {
     skip_times: Option<SkipTimes>,
 }
 
-/// Which times TheIntroDB has for an episode.
+/// Times TheIntroDB has for an episode, in seconds of this file.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkipTimes {
-    intro: bool,
-    credits: bool,
+    /// Start and end of the intro and of the recap.
+    intro: Option<(f64, f64)>,
+    recap: Option<(f64, f64)>,
+    /// Start of the end credits.
+    credits: Option<f64>,
+    /// Where a scene after the credits starts.
+    after_credits: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -323,9 +329,14 @@ fn movie(
         wishlist: rec.personal.wishlist,
         my_rating: rec.personal.rating,
         note: rec.personal.note.clone(),
-        skip_times: rec.segments.as_ref().map(|s| SkipTimes {
-            intro: !s.intro.is_empty() || !s.recap.is_empty(),
-            credits: !s.credits.is_empty(),
+        skip_times: rec.segments.as_ref().map(|s| {
+            let credits = s.end_credits(length);
+            SkipTimes {
+                intro: Segments::openers(&s.intro).next(),
+                recap: Segments::openers(&s.recap).next(),
+                credits: credits.map(|c| c.0),
+                after_credits: credits.map(|c| c.1).filter(|end| end.is_finite() && (length <= 0.0 || *end < length - 10.0)),
+            }
         }),
     };
 
