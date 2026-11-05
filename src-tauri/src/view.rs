@@ -74,6 +74,16 @@ pub struct Movie {
     wishlist: bool,
     my_rating: u8,
     note: String,
+    /// Times from TheIntroDB; None = not asked yet.
+    skip_times: Option<SkipTimes>,
+}
+
+/// Which times TheIntroDB has for an episode.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkipTimes {
+    intro: bool,
+    credits: bool,
 }
 
 #[derive(Serialize)]
@@ -313,6 +323,10 @@ fn movie(
         wishlist: rec.personal.wishlist,
         my_rating: rec.personal.rating,
         note: rec.personal.note.clone(),
+        skip_times: rec.segments.as_ref().map(|s| SkipTimes {
+            intro: !s.intro.is_empty() || !s.recap.is_empty(),
+            credits: !s.credits.is_empty(),
+        }),
     };
 
     if let Some((show_id, ep)) = episode {

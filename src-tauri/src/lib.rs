@@ -10,6 +10,7 @@ mod metadata;
 mod mobile;
 mod playback;
 mod scanner;
+mod segments;
 mod tmdb;
 mod tracks;
 mod update;
@@ -80,6 +81,9 @@ struct SettingsView {
     video_thumbnails: bool,
     watch_folders: bool,
     check_updates: bool,
+    skip_intro: bool,
+    skip_credits: bool,
+    autoplay_next: bool,
     tracks: tracks::TrackRules,
     /// Code and Czech name of the known languages.
     languages: Vec<(&'static str, &'static str)>,
@@ -104,6 +108,9 @@ fn settings_view(app: &AppHandle) -> SettingsView {
         video_thumbnails: db.settings.video_thumbnails,
         watch_folders: db.settings.watch_folders,
         check_updates: db.settings.check_updates,
+        skip_intro: db.settings.skip_intro,
+        skip_credits: db.settings.skip_credits,
+        autoplay_next: db.settings.autoplay_next,
         tracks: db.settings.tracks.clone(),
         languages: media::language_names(),
         backups_dir: state.backups_dir.to_string_lossy().to_string(),
@@ -503,6 +510,11 @@ async fn play_movie(app: AppHandle, id: u64, from_start: bool) -> Result<Movie, 
 }
 
 fn start_playback(app: AppHandle, id: u64, from_start: bool) -> Result<Movie, String> {
+    start_playback_with(app, id, from_start, false)
+}
+
+/// `fullscreen` = VLC opens in full screen (the next episode after one watched so).
+fn start_playback_with(app: AppHandle, id: u64, from_start: bool, fullscreen: bool) -> Result<Movie, String> {
     let state = app.state::<AppState>();
     let path = state
         .scan
@@ -521,10 +533,11 @@ fn start_playback(app: AppHandle, id: u64, from_start: bool) -> Result<Movie, St
         let position = db.records.get(&id).map(|r| r.position).unwrap_or(0.0);
         (db.settings.clone(), position)
     };
+    let plan = playback_plan(&state, id, &settings);
     let start = if !from_start && position >= RESUME_MIN_SECS {
         (position - RESUME_REWIND_SECS).max(0.0)
     } else {
-        0.0
+        plan.opening_end()
     };
     let title = view::player_title(&state, id);
     let tracks = view::resolved_tracks(&state, id);
@@ -535,12 +548,134 @@ fn start_playback(app: AppHandle, id: u64, from_start: bool) -> Result<Movie, St
         return Err(tr!("Tento film už se přehrává ve VLC.", "This movie is already playing in VLC."));
     }
     state.sessions.lock().unwrap().insert(id, start);
-    if let Err(e) = player::play(app.clone(), &settings, id, &path, start, &title, &tracks) {
+    if let Err(e) = player::play(app.clone(), &settings, id, &path, start, &title, &tracks, plan, fullscreen) {
         state.playing.lock().unwrap().remove(&id);
         state.sessions.lock().unwrap().remove(&id);
         return Err(e);
     }
     view::movie_by_id(&state, id)
+}
+
+/// What a playback of `id` skips. Downloads the times of an episode from TheIntroDB when
+/// they are needed and not stored or old.
+fn playback_plan(state: &AppState, id: u64, settings: &db::Settings) -> segments::Plan {
+    let (lookup, mut segments, length, is_episode) = {
+        let db = state.db.lock().unwrap();
+        let Some(record) = db.records.get(&id) else {
+            return segments::Plan::default();
+        };
+        let length = if record.duration > 0.0 { record.duration } else { record.media.as_ref().map_or(0.0, |m| m.duration) };
+        let is_episode = scanner::parse_episode(&record.rel_path)
+            .is_some_and(|e| library::show_ids(&db).contains_key(&scanner::show_key(&e.show)));
+        (library::episode_lookup(&db, id), record.segments.clone(), length, is_episode)
+    };
+    let wanted = settings.uses_segments() && segments.as_ref().is_none_or(|s| s.stale());
+    if let Some(ep) = lookup.filter(|_| wanted) {
+        // Without an answer in a few seconds the episode plays with the stored times (if any).
+        if let Ok(fetched) = segments::fetch(ep.tmdb_id, ep.season, ep.episode, ep.length, segments::PLAY_TIMEOUT) {
+            let mut db = state.db.lock().unwrap();
+            if let Some(record) = db.records.get_mut(&id) {
+                record.segments = Some(fetched.clone());
+                let _ = db.save(&state.db_path);
+            }
+            segments = Some(fetched);
+        }
+    }
+    if !is_episode {
+        return segments::Plan::default();
+    }
+    segments::Plan::new(settings, segments.as_ref(), length)
+}
+
+/// Starts the episode after `id` (it ended or its credits started); a failure is shown.
+pub(crate) fn play_next(app: &AppHandle, id: u64, fullscreen: bool) {
+    let state = app.state::<AppState>();
+    let next = {
+        let db = state.db.lock().unwrap();
+        let scan = state.scan.lock().unwrap();
+        library::next_episode(&db, &scan.found, id)
+    };
+    let Some(next) = next else {
+        return;
+    };
+    match start_playback_with(app.clone(), next, false, fullscreen) {
+        Ok(movie) => {
+            let _ = app.emit("autoplay-started", &movie);
+        }
+        Err(error) => {
+            let _ = app.emit("play-error", error);
+        }
+    }
+}
+
+/// Result of downloading the times of a series' episodes.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SegmentsResult {
+    /// Episodes asked about and those TheIntroDB has times for.
+    total: usize,
+    found: usize,
+    /// Why the download stopped early.
+    error: Option<String>,
+    data: AppData,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SegmentsProgress {
+    show_id: u64,
+    done: usize,
+    total: usize,
+}
+
+/// Downloads the intro and credits times of all episodes of a series from TheIntroDB.
+#[tauri::command]
+async fn fetch_show_segments(app: AppHandle, id: u64) -> Result<SegmentsResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let lookups: Vec<(u64, library::EpisodeLookup)> = {
+            let db = state.db.lock().unwrap();
+            if db.shows.get(&id).and_then(|s| s.meta.as_ref()).is_none() {
+                return Err(tr!(
+                    "Časy se hledají podle TMDB – seriál nejdřív přiřaďte v TMDB.",
+                    "The times are looked up by TMDB – match the series on TMDB first."
+                ));
+            }
+            library::show_episodes(&db, id)
+                .into_iter()
+                .filter_map(|ep| library::episode_lookup(&db, ep).map(|l| (ep, l)))
+                .collect()
+        };
+        let total = lookups.len();
+        let (mut found, mut error) = (0, None);
+        for (i, (ep, lookup)) in lookups.iter().enumerate() {
+            if i > 0 {
+                std::thread::sleep(segments::PACE);
+            }
+            match segments::fetch(lookup.tmdb_id, lookup.season, lookup.episode, lookup.length, std::time::Duration::from_secs(15)) {
+                Ok(times) => {
+                    found += usize::from(times.found());
+                    if let Some(record) = state.db.lock().unwrap().records.get_mut(ep) {
+                        record.segments = Some(times);
+                    }
+                }
+                Err(e) => {
+                    error = Some(e);
+                    break;
+                }
+            }
+            let _ = app.emit("segments-progress", SegmentsProgress { show_id: id, done: i + 1, total });
+        }
+        state.db.lock().unwrap().save(&state.db_path)?;
+        if found == 0 {
+            if let Some(error) = error {
+                return Err(error);
+            }
+        }
+        Ok(SegmentsResult { total, found, error, data: view::app_data(&state) })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------- tracks ----------
@@ -683,6 +818,8 @@ const LINKS: &[(&str, &str)] = &[
     ("tmdb-api", "https://www.themoviedb.org/settings/api"),
     ("tmdb-terms", "https://www.themoviedb.org/api-terms-of-use"),
     ("videolan", "https://www.videolan.org/"),
+    ("theintrodb", "https://theintrodb.org/"),
+    ("theintrodb-terms", "https://theintrodb.org/docs/terms"),
     ("tauri", "https://tauri.app/"),
     ("repo", "https://github.com/tomasbaier/Moviary"),
     ("releases", "https://github.com/tomasbaier/Moviary/releases/latest"),
@@ -928,6 +1065,7 @@ async fn set_language(app: AppHandle, language: String) -> Result<SettingsView, 
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn set_options(
     app: AppHandle,
     auto_metadata: bool,
@@ -935,6 +1073,9 @@ async fn set_options(
     video_thumbnails: bool,
     watch_folders: bool,
     check_updates: Option<bool>,
+    skip_intro: Option<bool>,
+    skip_credits: Option<bool>,
+    autoplay_next: Option<bool>,
 ) -> Result<SettingsView, String> {
     {
         let state = app.state::<AppState>();
@@ -945,6 +1086,16 @@ async fn set_options(
         db.settings.watch_folders = watch_folders;
         if let Some(check_updates) = check_updates {
             db.settings.check_updates = check_updates;
+        }
+        let settings = &mut db.settings;
+        for (value, setting) in [
+            (skip_intro, &mut settings.skip_intro),
+            (skip_credits, &mut settings.skip_credits),
+            (autoplay_next, &mut settings.autoplay_next),
+        ] {
+            if let Some(value) = value {
+                *setting = value;
+            }
         }
         db.save(&state.db_path)?;
     }
@@ -1031,6 +1182,7 @@ pub fn run() {
             bulk_set_watched,
             reset_progress,
             play_movie,
+            fetch_show_segments,
             reveal_in_explorer,
             fetch_metadata,
             cancel_metadata,

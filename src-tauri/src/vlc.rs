@@ -2,7 +2,8 @@
 //!
 //! VLC is started with its HTTP interface bound to localhost on a random port with a random
 //! password. A background thread polls `/requests/status.json` every second, stores the
-//! position periodically and once more when VLC exits.
+//! position periodically and once more when VLC exits. It also jumps over the intro, ends
+//! the episode at its credits and starts the next one, as the [`Plan`] says.
 
 use std::collections::hash_map::RandomState;
 use std::fs;
@@ -19,6 +20,7 @@ use tauri::AppHandle;
 
 use crate::db::Settings;
 use crate::playback;
+use crate::segments::Plan;
 use crate::tracks::Resolved;
 
 const DEFAULT_PATHS: &[&str] = &[
@@ -28,10 +30,14 @@ const DEFAULT_PATHS: &[&str] = &[
 
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
+/// The end of a file is this close when VLC closes by itself (it is polled every second).
+const END_MARGIN: f64 = 5.0;
+
 struct Status {
     time: f64,
     length: f64,
     state: String,
+    fullscreen: bool,
 }
 
 pub fn detect() -> Option<PathBuf> {
@@ -96,6 +102,7 @@ pub fn detected(_app: &AppHandle) -> Option<String> {
 
 /// Plays `movie` from `start` seconds with the chosen tracks and tracks the position in the
 /// background.
+#[allow(clippy::too_many_arguments)]
 pub fn play(
     app: AppHandle,
     settings: &Settings,
@@ -104,16 +111,28 @@ pub fn play(
     start: f64,
     _title: &str,
     tracks: &Resolved,
+    plan: Plan,
+    fullscreen: bool,
 ) -> Result<(), String> {
     let vlc = resolve(settings.vlc_path.as_deref())
         .ok_or_else(|| tr!(
             "VLC nebyl nalezen. Nainstalujte VLC nebo nastavte cestu k vlc.exe v Nastavení.",
             "VLC was not found. Install VLC or set the path to vlc.exe in the Settings."
         ))?;
-    launch(app, &vlc, id, movie, start, tracks)
+    launch(app, &vlc, id, movie, start, tracks, plan, fullscreen)
 }
 
-fn launch(app: AppHandle, vlc: &Path, id: u64, movie: &Path, start: f64, tracks: &Resolved) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+fn launch(
+    app: AppHandle,
+    vlc: &Path,
+    id: u64,
+    movie: &Path,
+    start: f64,
+    tracks: &Resolved,
+    plan: Plan,
+    fullscreen: bool,
+) -> Result<(), String> {
     let port = TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
         .map_err(|e| tr!("Nelze najít volný port: {e}", "No free port found: {e}"))?
@@ -134,21 +153,32 @@ fn launch(app: AppHandle, vlc: &Path, id: u64, movie: &Path, start: f64, tracks:
     if start > 0.0 {
         cmd.arg(format!("--start-time={start:.0}"));
     }
+    if fullscreen {
+        cmd.arg("--fullscreen");
+    }
     cmd.args(tracks.vlc_args());
     cmd.arg(movie);
 
     let child = cmd
         .spawn()
         .map_err(|e| tr!("Nepodařilo se spustit VLC: {e}", "VLC could not be started: {e}"))?;
-    thread::spawn(move || monitor(app, child, id, port, auth));
+    thread::spawn(move || monitor(app, child, id, port, auth, plan));
     Ok(())
 }
 
-fn monitor(app: AppHandle, mut child: Child, id: u64, port: u16, auth: String) {
+fn monitor(app: AppHandle, mut child: Child, id: u64, port: u16, auth: String, plan: Plan) {
     let mut last_time: Option<f64> = None;
     let mut length = 0.0;
     let mut last_save = Instant::now();
     let mut dirty = false;
+    let mut fullscreen = false;
+    // Parts already jumped over or passed; seeking back into one plays it.
+    let mut skipped = vec![false; plan.skip.len()];
+    // Time of the previous poll while playing: the credits must come by playing, not by
+    // seeking into them.
+    let mut previous: Option<f64> = None;
+    let mut credits_done = false;
+    let mut ended = false;
 
     loop {
         thread::sleep(Duration::from_secs(1));
@@ -161,6 +191,7 @@ fn monitor(app: AppHandle, mut child: Child, id: u64, port: u16, auth: String) {
         if status.length > 0.0 {
             length = status.length;
         }
+        fullscreen = status.fullscreen;
         // After "stop" VLC reports time 0 – keep the last real position instead.
         if (status.state == "playing" || status.state == "paused")
             && status.time > 0.0
@@ -169,13 +200,47 @@ fn monitor(app: AppHandle, mut child: Child, id: u64, port: u16, auth: String) {
             last_time = Some(status.time);
             dirty = true;
         }
+        if status.state == "playing" {
+            let time = status.time;
+            for (done, (start, end)) in skipped.iter_mut().zip(&plan.skip) {
+                if !*done && time >= start - 1.0 && time < end - 1.0 {
+                    command(port, &auth, &format!("seek&val={}", end.round()));
+                    last_time = Some(end.round());
+                    dirty = true;
+                }
+                if time >= start - 1.0 {
+                    *done = true;
+                }
+            }
+            if let (Some(credits), false) = (plan.credits, credits_done) {
+                if previous.is_some_and(|p| p < credits && time >= credits && time - p <= 5.0) {
+                    credits_done = true;
+                    match plan.after_credits {
+                        Some(after) => command(port, &auth, &format!("seek&val={}", after.round())),
+                        None => {
+                            // The episode is over: close VLC (the next one opens a new window).
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            ended = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            previous = Some(time);
+        }
         if dirty && last_save.elapsed() >= SAVE_INTERVAL {
             playback::record(&app, id, last_time, length, false, false);
             last_save = Instant::now();
             dirty = false;
         }
     }
-    playback::record(&app, id, last_time, length, true, false);
+    // VLC closes by itself at the end of the file (--play-and-exit).
+    let reached_end = ended || (length > 0.0 && last_time.is_some_and(|t| length - t <= END_MARGIN));
+    playback::record(&app, id, last_time, length, true, ended);
+    if plan.autoplay && reached_end {
+        crate::play_next(&app, id, fullscreen);
+    }
 }
 
 /// Creates thumbnails (frames from the video) with a hidden VLC instance.
@@ -246,11 +311,27 @@ fn snapshot(vlc: &Path, movie: &Path, dir: &Path, name: &str) -> bool {
 }
 
 fn query_status(port: u16, auth: &str) -> Option<Status> {
+    let json = request(port, auth, "")?;
+    Some(Status {
+        time: number(&json["time"]),
+        length: number(&json["length"]),
+        state: json["state"].as_str().unwrap_or_default().to_string(),
+        fullscreen: json["fullscreen"].as_bool().unwrap_or_else(|| number(&json["fullscreen"]) > 0.0),
+    })
+}
+
+/// Sends a command of the HTTP interface ("seek&val=90").
+fn command(port: u16, auth: &str, command: &str) {
+    let _ = request(port, auth, &format!("?command={command}"));
+}
+
+/// GET `/requests/status.json` with `query`; the status VLC answers with.
+fn request(port: u16, auth: &str, query: &str) -> Option<serde_json::Value> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
     let request = format!(
-        "GET /requests/status.json HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\
+        "GET /requests/status.json{query} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\
          Authorization: Basic {auth}\r\nConnection: close\r\n\r\n"
     );
     stream.write_all(request.as_bytes()).ok()?;
@@ -270,12 +351,7 @@ fn query_status(port: u16, auth: &str) -> Option<Status> {
         body.to_vec()
     };
 
-    let json: serde_json::Value = serde_json::from_slice(&body).ok()?;
-    Some(Status {
-        time: number(&json["time"]),
-        length: number(&json["length"]),
-        state: json["state"].as_str().unwrap_or_default().to_string(),
-    })
+    serde_json::from_slice(&body).ok()
 }
 
 fn number(value: &serde_json::Value) -> f64 {

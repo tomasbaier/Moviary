@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::media::MediaInfo;
+use crate::segments::Segments;
 use crate::tracks::{TrackChoice, TrackRules};
 
 pub const VERSION: u32 = 2;
@@ -184,6 +185,19 @@ pub struct Settings {
     pub update_checked: u64,
     /// Version the user chose to skip; automatic checks do not offer it.
     pub skipped_version: String,
+    /// Jump over the intro and the recap of episodes (times from TheIntroDB).
+    pub skip_intro: bool,
+    /// End an episode when its credits start (times from TheIntroDB; Windows only).
+    pub skip_credits: bool,
+    /// Start the next episode when one ends.
+    pub autoplay_next: bool,
+}
+
+impl Settings {
+    /// Episode times from TheIntroDB are needed.
+    pub fn uses_segments(&self) -> bool {
+        self.skip_intro || (self.skip_credits && cfg!(desktop))
+    }
 }
 
 impl Default for Settings {
@@ -200,6 +214,9 @@ impl Default for Settings {
             check_updates: true,
             update_checked: 0,
             skipped_version: String::new(),
+            skip_intro: false,
+            skip_credits: false,
+            autoplay_next: false,
         }
     }
 }
@@ -266,6 +283,9 @@ pub struct Record {
     /// Want to watch, own rating and note (movies only; episodes use their show's).
     #[serde(skip_serializing_if = "Personal::is_empty")]
     pub personal: Personal,
+    /// Intro and credits times of an episode from TheIntroDB; None = not asked yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub segments: Option<Segments>,
 }
 
 /// Movie information from TMDB.

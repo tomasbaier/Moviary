@@ -312,6 +312,59 @@ pub fn show_seasons(db: &Db, show_id: u64) -> Vec<u32> {
     seasons
 }
 
+/// An episode as TheIntroDB looks it up.
+pub struct EpisodeLookup {
+    /// TMDB id of the series.
+    pub tmdb_id: u64,
+    pub season: u32,
+    pub episode: u32,
+    /// Length of the file in seconds (0 = unknown).
+    pub length: f64,
+}
+
+/// TheIntroDB lookup of an episode record of a series matched on TMDB. None for movies and
+/// for files with more episodes (their times would not fit).
+pub fn episode_lookup(db: &Db, id: u64) -> Option<EpisodeLookup> {
+    let rec = db.records.get(&id)?;
+    let ep = scanner::parse_episode(&rec.rel_path).filter(|e| e.last_episode.is_none())?;
+    let key = scanner::show_key(&ep.show);
+    let tmdb_id = db.shows.values().find(|s| s.key == key)?.meta.as_ref()?.tmdb_id;
+    let length = if rec.duration > 0.0 { rec.duration } else { rec.media.as_ref().map_or(0.0, |m| m.duration) };
+    (tmdb_id > 0).then_some(EpisodeLookup { tmdb_id, season: ep.season, episode: ep.episode, length })
+}
+
+/// Episode records of a show, by season and episode.
+pub fn show_episodes(db: &Db, show_id: u64) -> Vec<u64> {
+    let Some(show) = db.shows.get(&show_id) else {
+        return Vec::new();
+    };
+    let mut episodes: Vec<(u32, u32, u64)> = db
+        .records
+        .iter()
+        .filter_map(|(id, r)| scanner::parse_episode(&r.rel_path).map(|e| (*id, e)))
+        .filter(|(_, e)| scanner::show_key(&e.show) == show.key)
+        .map(|(id, e)| (e.season, e.episode, id))
+        .collect();
+    episodes.sort_unstable();
+    episodes.into_iter().map(|(_, _, id)| id).collect()
+}
+
+/// The episode after `id` in its series whose file is reachable (`found`): the next one of
+/// the season or the first of a following season. Specials (season 0) lead only to specials.
+pub fn next_episode(db: &Db, found: &HashMap<u64, PathBuf>, id: u64) -> Option<u64> {
+    let current = scanner::parse_episode(&db.records.get(&id)?.rel_path)?;
+    let key = scanner::show_key(&current.show);
+    let after = (current.season, current.last_episode.unwrap_or(current.episode));
+    db.records
+        .iter()
+        .filter(|(other, _)| found.contains_key(other))
+        .filter_map(|(other, r)| scanner::parse_episode(&r.rel_path).map(|e| (*other, e)))
+        .filter(|(_, e)| scanner::show_key(&e.show) == key)
+        .filter(|(_, e)| (e.season == 0) == (current.season == 0) && (e.season, e.episode) > after)
+        .min_by_key(|(other, e)| (e.season, e.episode, *other))
+        .map(|(other, _)| other)
+}
+
 /// Removes shows that have no episode records left; returns their thumbnails.
 pub fn prune_shows(db: &mut Db) -> Vec<String> {
     let keys: HashSet<String> = db

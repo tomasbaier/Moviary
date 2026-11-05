@@ -981,6 +981,10 @@ function renderShowPage() {
           <h3>${t('Informace o seriálu')}</h3>
           ${metaSectionHtml(s)}
         </div>
+        <div class="panel">
+          <h3>${t('Intro a titulky')}</h3>
+          ${skipPanelHtml(s)}
+        </div>
         ${IS_ANDROID ? '' : `<div class="panel">
           <h3>${t('Zvuk a titulky pro všechny epizody')}</h3>
           ${showTracksHtml(s)}
@@ -1012,6 +1016,53 @@ function renderShowPage() {
         list: missing.length > 20 ? `${missing.length} ${plural(missing.length, 'epizoda', 'epizody', 'epizod')}` : missing.map((n) => `E${pad2(n)}`).join(', '),
       })}</div>` : ''}`;
   });
+}
+
+// ---------- intro and credits times (TheIntroDB) ----------
+
+/** Show id -> "12/40" while its times are being downloaded. */
+const segmentsProgress = new Map();
+
+/** The show page panel: how many episodes have times, and the download button. */
+function skipPanelHtml(s) {
+  const asked = s.episodes.filter((e) => e.skipTimes);
+  const found = asked.filter((e) => e.skipTimes.intro || e.skipTimes.credits).length;
+  const running = segmentsProgress.get(s.id);
+  const set = state.settings;
+  const enabled = set && (set.skipIntro || (set.skipCredits && !IS_ANDROID));
+  let status;
+  if (!s.tmdbId) status = t('Časy se hledají podle TMDB – nejdřív seriálu přiřaďte informace z TMDB.');
+  else if (!asked.length) status = t('Zatím nestaženo. Časy se stáhnou samy, když pustíte epizodu se zapnutým přeskakováním.');
+  else status = t('Časy intra nebo titulků zná TheIntroDB u {n} z {total} {noun}.', {
+    n: found, total: s.episodes.length, noun: plural(s.episodes.length, 'epizody', 'epizod', 'epizod'),
+  });
+  return `
+    <div class="muted">${status}</div>
+    ${enabled ? '' : `<div class="muted" style="margin-top:6px">${t('Přeskakování zapnete v Nastavení → Přehrávání seriálů.')}</div>`}
+    <div class="row" style="margin-top:10px">
+      <button class="btn small" data-act="fetch-segments" ${!s.tmdbId || running ? 'disabled' : ''}>${running
+        ? t('Stahuji {progress}…', { progress: running })
+        : t('Stáhnout z TheIntroDB')}</button>
+      <button class="btn small" type="button" data-link="theintrodb">TheIntroDB</button>
+    </div>`;
+}
+
+async function fetchSegments(s) {
+  segmentsProgress.set(s.id, `0/${s.episodes.length}`);
+  render();
+  let result;
+  try {
+    result = await invoke('fetch_show_segments', { id: s.id });
+  } catch (err) {
+    toast(String(err), 'error');
+  }
+  segmentsProgress.delete(s.id);
+  if (!result) return render();
+  applyData(result.data);
+  if (result.error) toast(result.error, 'error');
+  toast(t('TheIntroDB má časy pro {n} z {total} {noun}.', {
+    n: result.found, total: result.total, noun: plural(result.total, 'epizody', 'epizod', 'epizod'),
+  }), result.found ? 'ok' : 'info');
 }
 
 // ---------- upcoming episodes (TMDB next_episode_to_air) ----------
@@ -1061,6 +1112,14 @@ function upcomingShows() {
     .sort((a, b) => a.nextEpisode.airDate.localeCompare(b.nextEpisode.airDate) || byTitle(a, b));
 }
 
+/** "⏭ intro, titulky" when TheIntroDB has times for the episode. */
+function skipTimesLabel(e) {
+  const times = e.skipTimes;
+  if (!times || !(times.intro || times.credits)) return null;
+  const parts = [times.intro ? t('intro') : null, times.credits ? t('titulky') : null].filter(Boolean);
+  return `<span title="${t('Časy z TheIntroDB')}">⏭ ${parts.join(', ')}</span>`;
+}
+
 function episodeRow(e) {
   const pct = percent(e);
   const classes = ['ep', e.watched ? 'watched' : '', e.available ? '' : 'offline', e.playing ? 'playing' : ''].join(' ');
@@ -1070,6 +1129,7 @@ function episodeRow(e) {
     fmtSize(e.size),
     e.position > 0 ? `<span class="accent">${fmtTime(e.position)}${e.duration ? ` / ${fmtTime(e.duration)}` : ''}</span>` : null,
     e.watched ? `<span class="ok">✓ ${t('Zhlédnuto')}</span>` : null,
+    skipTimesLabel(e),
   ].filter(Boolean).join(' · ');
   const canPlay = e.available && !e.playing;
   return `
@@ -1446,6 +1506,21 @@ async function openSettings() {
           ${s.vlcPath ? `<button class="btn small" data-act="auto-vlc">${t('Použít automatickou detekci')}</button>` : ''}
         </div>
       </div>`}
+
+      <div class="setting">
+        <div class="title">${t('Přehrávání seriálů')}</div>
+        <label class="check-row" style="margin-top:0"><input type="checkbox" data-opt="autoplayNext" ${s.autoplayNext ? 'checked' : ''} />
+          <span>${t('Po skončení epizody pustit další')}<small>${android
+            ? t('Další díl se spustí sám, když epizoda doběhne do konce.')
+            : t('Další díl se spustí sám, když epizoda doběhne do konce, nebo když začnou titulky, pokud je přeskakujete.')}</small></span></label>
+        <label class="check-row"><input type="checkbox" data-opt="skipIntro" ${s.skipIntro ? 'checked' : ''} />
+          <span>${t('Přeskakovat intro a rekapitulaci')}<small>${android
+            ? t('Jen když intro začíná hned na začátku epizody – VLC pro Android se během přehrávání nedá ovládat.')
+            : t('VLC intro přeskočí samo. Když se do něj vrátíte, nechá ho běžet.')}</small></span></label>
+        ${android ? '' : `<label class="check-row"><input type="checkbox" data-opt="skipCredits" ${s.skipCredits ? 'checked' : ''} />
+          <span>${t('Přeskakovat závěrečné titulky')}<small>${t('Epizoda skončí, jakmile začnou titulky. Scéna po titulcích se nepřeskočí.')}</small></span></label>`}
+        ${introDbNoticeHtml()}
+      </div>
 
       ${android ? '' : trackRulesHtml(s.tracks)}
 
@@ -2110,6 +2185,16 @@ function tmdbNoticeHtml() {
     </div>`;
 }
 
+/** Credit for the intro and credits times (TheIntroDB asks for its name and a link). */
+function introDbNoticeHtml() {
+  return `
+    <div class="muted" style="margin-top:10px">${t('Časy intra a titulků poskytuje TheIntroDB, komunitní databáze, do které je zadávají sami diváci, takže nemusí vždy sedět přesně. Stahují se podle TMDB ID seriálu, když pustíte epizodu (jen se zapnutým přeskakováním), nebo tlačítkem na stránce seriálu. Moviary s TheIntroDB nijak nesouvisí.')}</div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn small" type="button" data-link="theintrodb">theintrodb.org</button>
+      <button class="btn small" type="button" data-link="theintrodb-terms">${t('Podmínky TheIntroDB')}</button>
+    </div>`;
+}
+
 async function openAbout() {
   const s = state.settings || (await call('get_settings')) || {};
   const android = s.platform === 'android';
@@ -2134,6 +2219,11 @@ async function openAbout() {
     </div>
 
     <div class="setting">
+      <div class="title">${t('Časy intra a titulků')}</div>
+      ${introDbNoticeHtml()}
+    </div>
+
+    <div class="setting">
       <div class="title">${t('Přehrávač')}</div>
       <div class="muted">${android
         ? t('Videa přehrává VLC pro Android, které se instaluje zvlášť z Google Play. VLC je ochranná známka VideoLAN; Moviary s VideoLAN nijak nesouvisí.')
@@ -2143,7 +2233,7 @@ async function openAbout() {
 
     <div class="setting">
       <div class="title">${t('Soukromí')}</div>
-      <div class="muted">${t('Moviary nemá účty, reklamy ani sběr statistik. Do internetu se připojuje jen k TMDB (s vaším klíčem) a ke GitHubu kvůli kontrole nových verzí (lze vypnout v Nastavení). Kategorie, pozice přehrávání a ostatní data zůstávají v tomto zařízení.')}</div>
+      <div class="muted">${t('Moviary nemá účty, reklamy ani sběr statistik. Do internetu se připojuje jen k TMDB (s vaším klíčem), k TheIntroDB kvůli časům intra a titulků (jen se zapnutým přeskakováním nebo na vyžádání) a ke GitHubu kvůli kontrole nových verzí (lze vypnout v Nastavení). Kategorie, pozice přehrávání a ostatní data zůstávají v tomto zařízení.')}</div>
     </div>
 
     <div class="setting">
@@ -3228,10 +3318,14 @@ function bindEvents() {
       state.season = +tab.dataset.season;
       return render();
     }
+    const link = e.target.closest('[data-link]');
+    if (link) return openLink(link.dataset.link);
     const act = e.target.closest('[data-act]')?.dataset.act;
     const ep = s.episodes.find((x) => x.id === +e.target.closest('[data-ep]')?.dataset.ep);
     const season = s.seasons.find((x) => x.number === state.season);
-    if (act === 'back') {
+    if (act === 'fetch-segments') {
+      fetchSegments(s);
+    } else if (act === 'back') {
       state.showId = null;
       render();
     } else if (act === 'play-next') {
@@ -3398,6 +3492,17 @@ async function init() {
   });
   await listen('metadata-progress', (e) => onJobProgress(e.payload));
   await listen('play-error', (e) => toast(String(e.payload), 'error'));
+  await listen('autoplay-started', (e) => {
+    updateMovie(e.payload);
+    toast(t('Další díl: {code} · {title}', { code: epCode(e.payload), title: e.payload.title }));
+  });
+  await listen('segments-progress', (e) => {
+    const { showId, done, total } = e.payload;
+    if (!segmentsProgress.has(showId)) return;
+    segmentsProgress.set(showId, `${done}/${total}`);
+    const button = state.showId === showId && $('#show-page [data-act="fetch-segments"]');
+    if (button) button.textContent = t('Stahuji {progress}…', { progress: `${done}/${total}` });
+  });
   await listen('update-progress', (e) => state.updateProgress?.(e.payload));
   await listen('library-changed', async (e) => {
     const data = await call('get_data');

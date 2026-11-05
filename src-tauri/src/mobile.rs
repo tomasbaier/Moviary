@@ -122,6 +122,7 @@ pub fn detected(app: &AppHandle) -> Option<String> {
 
 /// Opens `movie` in VLC for Android; the position is stored when VLC is closed. The intent
 /// cannot choose tracks, VLC for Android uses its own language preferences.
+#[allow(clippy::too_many_arguments)]
 pub fn play(
     app: AppHandle,
     _settings: &Settings,
@@ -130,6 +131,8 @@ pub fn play(
     start: f64,
     title: &str,
     _tracks: &crate::tracks::Resolved,
+    plan: crate::segments::Plan,
+    _fullscreen: bool,
 ) -> Result<(), String> {
     if !vlc_info(&app).is_some_and(|v| v.installed) {
         return Err(tr!(
@@ -149,6 +152,11 @@ pub fn play(
             let seconds = |ms: Option<i64>| ms.filter(|ms| *ms > 0).map(|ms| ms as f64 / 1000.0);
             let length = seconds(result.duration).unwrap_or(0.0);
             playback::record(&app, id, seconds(result.position), length, true, result.ended);
+            // VLC for Android cannot be controlled while it plays: the intro is skipped only
+            // at the start (see `Plan::opening_end`) and the next episode follows the end.
+            if plan.autoplay && result.ended {
+                crate::play_next(&app, id, false);
+            }
         }
         Err(error) => playback::failed(&app, id, tr!("VLC se nepodařilo spustit: {error}", "VLC could not be started: {error}")),
     });

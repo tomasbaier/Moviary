@@ -68,6 +68,12 @@ znovu `npm run screenshots`, viz [scripts/screenshots/take.js](scripts/screensho
 - Přehrávání ve VLC. Aplikace sleduje pozici přes lokální HTTP rozhraní VLC (náhodný port a heslo,
   jen 127.0.0.1) a ukládá ji každých 5 s i při zavření VLC. Příště film naváže na uloženou
   pozici (o 5 s dříve). Po dokoukání (≥ 95 % nebo posledních 30 s) se film označí jako zhlédnutý.
+- Přehrávání seriálů (v Nastavení, ve výchozím stavu vypnuté): další díl se pustí sám, když
+  epizoda skončí; intro a rekapitulace se přeskočí a epizoda může skončit hned, jak začnou
+  závěrečné titulky (scéna po titulcích zůstane). Časy pocházejí z komunitní databáze
+  [TheIntroDB](https://theintrodb.org/) podle TMDB ID seriálu a stahují se při spuštění epizody,
+  nebo pro celý seriál tlačítkem na jeho stránce. VLC se při tom ovládá přes stejné lokální HTTP
+  rozhraní; další díl se otevře v novém okně VLC (na celou obrazovku, pokud předchozí byl).
 - Technické údaje přímo z hlaviček souborů MKV/WebM a MP4/MOV (čte se jen pár set kB, ne celý
   soubor): kodek, rozlišení, HDR10/HLG/Dolby Vision, bitová hloubka, délka a zvukové a titulkové
   stopy s jazyky a počtem kanálů; k tomu titulky uložené vedle filmu (`Film.cs.srt`, složka
@@ -143,6 +149,8 @@ nebo USB disku), aplikace je prohledá, roztřídí a přehrává ve **VLC pro A
   převezme pozici, kde jste skončili; dokoukaný film se označí jako zhlédnutý. VLC musí mít také
   povolený přístup k souborům (zeptá se samo), titulky vedle videa najde automaticky.
 - Náhledy filmů bez plakátu vytváří systémový dekodér Androidu (MediaMetadataRetriever).
+- VLC pro Android se během přehrávání nedá ovládat: další díl se pustí po skončení epizody, intro
+  se přeskočí jen tehdy, když je hned na začátku, a titulky se nepřeskakují.
 - Na telefonu jsou filtry ve vysouvacím panelu (ikona trychtýře), detail filmu přes celou
   obrazovku, hromadný výběr dlouhým podržením karty; systémové tlačítko Zpět zavírá detail,
   stránku seriálu, výběr i dialogy.
@@ -222,10 +230,21 @@ a nemá vlastní klíč – každý uživatel používá svůj bezplatný API kl
 [podmínkami TMDB API](https://www.themoviedb.org/api-terms-of-use). Aplikace je zdarma,
 bez reklam a nekomerční.
 
+## TheIntroDB
+
+Časy intra, rekapitulace a závěrečných titulků epizod poskytuje
+[TheIntroDB](https://theintrodb.org/), komunitní databáze, do které je zadávají sami diváci.
+Moviary s TheIntroDB nijak nesouvisí. Aplikace se ptá přímo ze zařízení uživatele, jen na epizody
+z jeho knihovny, a časy ukládá jen pro ni, v souladu s
+[podmínkami TheIntroDB](https://theintrodb.org/docs/terms) pro nekomerční aplikace. Časy nemusí
+vždy přesně sedět na vaši verzi souboru.
+
 ## Soukromí
 
 Moviary nemá účty, reklamy ani telemetrii. Připojuje se jen k `api.themoviedb.org` a
-`image.tmdb.org` (s vaším klíčem) a jednou denně k `api.github.com` kvůli kontrole nových verzí
+`image.tmdb.org` (s vaším klíčem), k `api.theintrodb.org` (TMDB ID seriálu, číslo sezóny a
+epizody a délka souboru; jen se zapnutým přeskakováním intra nebo titulků, nebo když časy
+stáhnete tlačítkem) a jednou denně k `api.github.com` kvůli kontrole nových verzí
 (v Nastavení lze vypnout). Ostatní data – kategorie, pozice přehrávání, historie –
 zůstávají v datovém souboru v počítači nebo telefonu. VLC běží jako samostatný program; jeho
 ovládací rozhraní poslouchá jen na `127.0.0.1` s náhodným heslem.
