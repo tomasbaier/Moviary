@@ -34,6 +34,45 @@ pub struct Db {
     pub history: Vec<PlayEvent>,
     /// Movie series (collections) on TMDB that movies of the library belong to, by TMDB id.
     pub collections: BTreeMap<u64, Collection>,
+    /// Filters saved by the user, in the order shown.
+    pub saved_filters: Vec<SavedFilter>,
+}
+
+/// A named combination of filters; `filter` is kept as the frontend sends it.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SavedFilter {
+    pub name: String,
+    pub filter: Value,
+}
+
+/// The user's own information about a movie or a series.
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Personal {
+    /// On the "want to watch" list.
+    pub wishlist: bool,
+    /// 1–5 stars; 0 = not rated.
+    pub rating: u8,
+    pub note: String,
+}
+
+impl Personal {
+    pub fn is_empty(&self) -> bool {
+        *self == Personal::default()
+    }
+}
+
+/// The next episode of a series on TMDB.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct NextEpisode {
+    pub season: u32,
+    pub episode: u32,
+    pub name: String,
+    pub name_en: String,
+    /// "YYYY-MM-DD".
+    pub air_date: String,
 }
 
 /// Version of [`Meta`]: older metadata is refreshed by the metadata job (by its known TMDB
@@ -117,6 +156,7 @@ impl Default for Db {
             shows: BTreeMap::new(),
             history: Vec::new(),
             collections: BTreeMap::new(),
+            saved_filters: Vec::new(),
         }
     }
 }
@@ -223,6 +263,9 @@ pub struct Record {
     /// Audio and subtitles chosen for this file.
     #[serde(skip_serializing_if = "TrackChoice::is_empty")]
     pub tracks: TrackChoice,
+    /// Want to watch, own rating and note (movies only; episodes use their show's).
+    #[serde(skip_serializing_if = "Personal::is_empty")]
+    pub personal: Personal,
 }
 
 /// Movie information from TMDB.
@@ -313,6 +356,22 @@ pub struct Show {
     /// Audio and subtitle languages for all episodes.
     #[serde(skip_serializing_if = "TrackChoice::is_empty")]
     pub tracks: TrackChoice,
+    #[serde(skip_serializing_if = "Personal::is_empty")]
+    pub personal: Personal,
+    /// TMDB status ("Returning Series", "Ended", "Canceled"…); None = not loaded yet
+    /// (data from version 1.5 and older).
+    pub status: Option<String>,
+    /// Next episode announced on TMDB.
+    pub next_episode: Option<NextEpisode>,
+}
+
+impl Show {
+    /// Still running: new episodes can come.
+    pub fn airing(&self) -> bool {
+        self.status
+            .as_deref()
+            .is_some_and(|s| !s.is_empty() && s != "Ended" && s != "Canceled")
+    }
 }
 
 /// Season of a show on TMDB.

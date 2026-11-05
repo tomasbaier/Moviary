@@ -70,6 +70,10 @@ pub struct Movie {
     collection: Option<CollectionLink>,
     /// TMDB ids of recommended and similar movies.
     similar: Vec<u64>,
+    /// Want to watch, own rating (0–5) and note.
+    wishlist: bool,
+    my_rating: u8,
+    note: String,
 }
 
 #[derive(Serialize)]
@@ -184,6 +188,25 @@ pub struct Show {
     creator_list: Vec<Person>,
     /// TMDB ids of recommended and similar series.
     similar: Vec<u64>,
+    wishlist: bool,
+    my_rating: u8,
+    note: String,
+    /// New episodes can still come (TMDB status).
+    airing: bool,
+    /// TMDB status: "Returning Series", "Ended", "Canceled"…
+    status: String,
+    next_episode: Option<NextEpisodeView>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextEpisodeView {
+    season: u32,
+    episode: u32,
+    /// In the app's language.
+    title: String,
+    /// "YYYY-MM-DD".
+    air_date: String,
 }
 
 #[derive(Serialize)]
@@ -212,6 +235,7 @@ pub struct AppData {
     scanned: bool,
     /// Movie series of the shown movies.
     collections: Vec<CollectionInfo>,
+    saved_filters: Vec<db::SavedFilter>,
 }
 
 fn movie(
@@ -286,6 +310,9 @@ fn movie(
         directors: Vec::new(),
         collection: None,
         similar: Vec::new(),
+        wishlist: rec.personal.wishlist,
+        my_rating: rec.personal.rating,
+        note: rec.personal.note.clone(),
     };
 
     if let Some((show_id, ep)) = episode {
@@ -389,6 +416,17 @@ fn show(id: u64, show: &db::Show) -> Show {
         cast: meta.map(|m| m.cast.clone()).unwrap_or_default(),
         creator_list: meta.map(|m| m.directors.clone()).unwrap_or_default(),
         similar: meta.map(|m| m.similar.clone()).unwrap_or_default(),
+        wishlist: show.personal.wishlist,
+        my_rating: show.personal.rating,
+        note: show.personal.note.clone(),
+        airing: show.airing(),
+        status: show.status.clone().unwrap_or_default(),
+        next_episode: show.next_episode.as_ref().map(|n| NextEpisodeView {
+            season: n.season,
+            episode: n.episode,
+            title: db::localized(&n.name, &n.name_en).to_string(),
+            air_date: n.air_date.clone(),
+        }),
     }
 }
 
@@ -470,6 +508,7 @@ pub fn app_data(state: &AppState) -> AppData {
         missing,
         scanned: scan.scanned,
         collections,
+        saved_filters: db.saved_filters.clone(),
     }
 }
 

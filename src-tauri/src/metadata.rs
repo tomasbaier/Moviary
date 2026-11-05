@@ -179,8 +179,12 @@ fn collect_tasks(app: &AppHandle, state: &AppState, ids: Option<Vec<u64>>, force
                 show.seasons.iter().any(|s| s.number == *n) && !show.episodes.iter().any(|e| e.season == *n)
             })
         });
-        let lookup =
-            has_key && (force || !show.meta_checked || new_season.is_some() || outdated(show.meta.as_ref(), &db.collections));
+        let lookup = has_key
+            && (force
+                || !show.meta_checked
+                || new_season.is_some()
+                || outdated(show.meta.as_ref(), &db.collections)
+                || airing_due(show));
         let thumbnail = thumbnails && show.thumbnail.is_none() && (force || !show.thumb_checked);
         if !lookup && !(thumbnail && !has_poster) {
             continue;
@@ -214,6 +218,25 @@ fn outdated(meta: Option<&Meta>, collections: &std::collections::BTreeMap<u64, C
             .is_some_and(|c| db::tmdb_stale(c.fetched));
         !m.bilingual || m.version < META_VERSION || db::tmdb_stale(m.fetched) || series_stale
     })
+}
+
+/// A running series is refreshed weekly, and a day after its announced next episode aired,
+/// so the next episode shown stays current. Series loaded by version 1.5 or older have no
+/// status yet and are refreshed once.
+fn airing_due(show: &db::Show) -> bool {
+    const DAY: u64 = 24 * 3600;
+    let Some(meta) = &show.meta else {
+        return false;
+    };
+    if show.status.is_none() {
+        return true;
+    }
+    let age = db::now().saturating_sub(meta.fetched);
+    if !show.airing() || age < DAY {
+        return false;
+    }
+    let today = crate::backup::date_stamp(db::now());
+    age > 7 * DAY || show.next_episode.as_ref().is_some_and(|n| n.air_date < today)
 }
 
 /// Fetches the parts of the movie series `meta` belongs to when they are not stored yet
@@ -350,6 +373,8 @@ pub fn apply(
                     show.meta = Some(info.meta);
                     show.seasons = info.seasons;
                     show.episodes = info.episodes;
+                    show.status = Some(info.status);
+                    show.next_episode = info.next_episode;
                 }
             }
             add_results(&mut show.categories, genre_categories, &mut show.thumbnail, &mut show.thumb_checked, thumbnail);

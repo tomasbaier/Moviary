@@ -83,6 +83,14 @@ Pro plakáty a popisy si vytvořte bezplatný API klíč na
 - Starší informace z TMDB (bez herců, sérií a doporučení) se doplní na pozadí podle známé shody.
   Stejně se obnoví údaje a plakáty starší než 150 dní – podmínky TMDB nedovolují ukládat jejich
   data déle než 6 měsíců (obnova běží s automatickým načítáním informací a s nastaveným klíčem).
+- Chci vidět, vlastní hodnocení a poznámka: u filmu i seriálu (v detailu, na stránce seriálu nebo
+  hromadně pro vybrané). Stav „Chci vidět“ ve filtrech a řada na úvodní obrazovce, řazení „podle mého
+  hodnocení“ (1–5 ♥), hledá se i v poznámkách.
+- Nové díly seriálů: s TMDB klíčem ukazuje u běžícího seriálu datum dalšího dílu („Další díl S02E05
+  vyjde čt 12. 11.“) a na úvodní obrazovce řadu „Nové díly seriálů“ (vyšlé za poslední týden a
+  chystané na příští měsíc). Údaje o běžících seriálech se obnovují jednou týdně a den po vydání dílu.
+- Uložené filtry: libovolnou kombinaci filtrů (záložka, stav, kategorie, technické údaje, složka,
+  herec, hledaný text a řazení) jde uložit pod názvem do postranního panelu a jedním klikem obnovit.
 - Aktualizace: jednou denně se podívá do [GitHub Releases](../../releases), jestli nevyšla nová verze,
   a nabídne ji i s poznámkami k vydání. Na Windows ji stáhne, ověří (velikost a SHA-256 z GitHubu),
   nahradí jí běžící exe a restartuje se – zástupci dál fungují. Na Androidu stáhne APK a otevře

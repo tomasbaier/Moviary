@@ -387,6 +387,84 @@ fn bulk_set_category(state: State<AppState>, ids: Vec<u64>, category: String, ad
 
 // ---------- playback ----------
 
+/// Own information of a movie or series: valid rating, note limited in length.
+fn personal(wishlist: bool, rating: u8, note: String) -> db::Personal {
+    db::Personal { wishlist, rating: rating.min(5), note: note.trim().chars().take(4000).collect() }
+}
+
+#[tauri::command]
+fn set_movie_personal(state: State<AppState>, id: u64, wishlist: bool, rating: u8, note: String) -> Result<Movie, String> {
+    let value = personal(wishlist, rating, note);
+    update_record(&state, id, |r| r.personal = value)
+}
+
+#[tauri::command]
+fn set_show_personal(state: State<AppState>, id: u64, wishlist: bool, rating: u8, note: String) -> Result<view::Show, String> {
+    let value = personal(wishlist, rating, note);
+    update_show(&state, id, |s| s.personal = value)
+}
+
+/// Adds or removes movies and shows (`ids`) from the "want to watch" list.
+#[tauri::command]
+fn bulk_set_wishlist(state: State<AppState>, ids: Vec<u64>, wishlist: bool) -> Result<AppData, String> {
+    {
+        let mut db = state.db.lock().unwrap();
+        for id in &ids {
+            if let Some(r) = db.records.get_mut(id) {
+                r.personal.wishlist = wishlist;
+            } else if let Some(s) = db.shows.get_mut(id) {
+                s.personal.wishlist = wishlist;
+            }
+        }
+        db.save(&state.db_path)?;
+    }
+    Ok(view::app_data(&state))
+}
+
+// ---------- saved filters ----------
+
+/// Saves `filter` under `name` (replacing one of the same name); returns all saved filters.
+#[tauri::command]
+fn save_filter(state: State<AppState>, name: String, filter: serde_json::Value) -> Result<Vec<db::SavedFilter>, String> {
+    let name: String = name.trim().chars().take(60).collect();
+    if name.is_empty() {
+        return Err(tr!("Zadejte název filtru.", "Enter a name for the filter."));
+    }
+    let mut db = state.db.lock().unwrap();
+    let saved = db::SavedFilter { name: name.clone(), filter };
+    match db.saved_filters.iter_mut().find(|f| f.name.to_lowercase() == name.to_lowercase()) {
+        Some(existing) => *existing = saved,
+        None => db.saved_filters.push(saved),
+    }
+    db.save(&state.db_path)?;
+    Ok(db.saved_filters.clone())
+}
+
+#[tauri::command]
+fn rename_filter(state: State<AppState>, name: String, new_name: String) -> Result<Vec<db::SavedFilter>, String> {
+    let new_name: String = new_name.trim().chars().take(60).collect();
+    if new_name.is_empty() {
+        return Err(tr!("Zadejte název filtru.", "Enter a name for the filter."));
+    }
+    let mut db = state.db.lock().unwrap();
+    if db.saved_filters.iter().any(|f| f.name != name && f.name.to_lowercase() == new_name.to_lowercase()) {
+        return Err(tr!("Filtr „{new_name}“ už existuje.", "A filter named “{new_name}” already exists."));
+    }
+    if let Some(f) = db.saved_filters.iter_mut().find(|f| f.name == name) {
+        f.name = new_name;
+    }
+    db.save(&state.db_path)?;
+    Ok(db.saved_filters.clone())
+}
+
+#[tauri::command]
+fn delete_filter(state: State<AppState>, name: String) -> Result<Vec<db::SavedFilter>, String> {
+    let mut db = state.db.lock().unwrap();
+    db.saved_filters.retain(|f| f.name != name);
+    db.save(&state.db_path)?;
+    Ok(db.saved_filters.clone())
+}
+
 #[tauri::command]
 fn set_watched(state: State<AppState>, id: u64, watched: bool) -> Result<Movie, String> {
     update_record(&state, id, |r| {
@@ -773,6 +851,8 @@ fn clear_show_metadata(state: State<AppState>, id: u64) -> Result<view::Show, St
         s.meta = None;
         s.seasons.clear();
         s.episodes.clear();
+        s.status = None;
+        s.next_episode = None;
         s.meta_checked = true;
     })
 }
@@ -927,6 +1007,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_data,
             open_link,
+            set_movie_personal,
+            set_show_personal,
+            bulk_set_wishlist,
+            save_filter,
+            rename_filter,
+            delete_filter,
             check_update,
             install_update,
             skip_update,

@@ -80,7 +80,7 @@ fn parse(text: &str) -> Result<(Db, Option<u64>), String> {
     Db::from_json(Ok(value)).map(|db| (db, None)).map_err(|_| invalid())
 }
 
-fn date_stamp(at: u64) -> String {
+pub fn date_stamp(at: u64) -> String {
     // Days since 1970 -> civil date (Howard Hinnant's algorithm), UTC is fine for a file name.
     let days = (at / DAY) as i64;
     let z = days + 719_468;

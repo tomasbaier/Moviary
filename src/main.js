@@ -47,6 +47,8 @@ const state = {
   focus: null,
   // Rows above the grid (continue watching, new, unwatched favourites).
   homeRows: true,
+  // Named filter combinations: [{ name, filter }] (see currentFilter).
+  savedFilters: [],
 };
 
 // Movies (without episodes) and shows with their episodes; rebuilt on every render.
@@ -77,6 +79,7 @@ const STATUS_FILTERS = [
     id: 'unwatched', label: 'Neviděné', color: 'var(--live)',
     test: (m) => (m.isShow ? !m.watchedCount && !m.inProgress : !m.watched && m.position <= 0),
   },
+  { id: 'wishlist', label: 'Chci vidět', color: 'var(--wish)', test: (m) => m.wishlist && !m.watched },
   { id: 'watched', label: 'Zhlédnuté', color: 'var(--ok)', test: (m) => m.watched },
   { id: 'offline', label: 'Nedostupné', color: '#ef4444', test: (m) => !m.available, hideEmpty: true },
 ];
@@ -88,6 +91,7 @@ const SORTS = {
   title: byTitle,
   year: (a, b) => (b.year || 0) - (a.year || 0) || byTitle(a, b),
   rating: (a, b) => (b.rating || 0) - (a.rating || 0) || byTitle(a, b),
+  mine: (a, b) => (b.myRating || 0) - (a.myRating || 0) || (b.rating || 0) - (a.rating || 0) || byTitle(a, b),
   recent: (a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0) || byTitle(a, b),
   added: (a, b) => b.added - a.added || byTitle(a, b),
   size: (a, b) => b.size - a.size || byTitle(a, b),
@@ -352,6 +356,7 @@ function applyData(data) {
   state.shows = data.shows;
   state.missing = data.missing;
   state.collections = data.collections || [];
+  state.savedFilters = data.savedFilters || [];
   const cats = new Set(data.categories);
   state.selectedCats = new Set([...state.selectedCats].filter((c) => cats.has(c)));
   const ids = new Set([...data.movies, ...data.shows].map((m) => m.id));
@@ -381,32 +386,66 @@ function findCategory(name) {
   return state.categories.find((c) => c.toLowerCase() === n);
 }
 
-function filtered() {
-  const q = normalize(state.search.trim());
-  const status = STATUS_FILTERS.find((f) => f.id === state.status) || STATUS_FILTERS[0];
-  const cats = [...state.selectedCats];
-  return viewItems()
+/** The current filters as a plain object – what a saved filter stores. */
+function currentFilter() {
+  const tech = Object.entries(state.tech)
+    .filter(([, values]) => values.size)
+    .map(([group, values]) => [group, [...values].sort()])
+    .sort(([a], [b]) => a.localeCompare(b));
+  return {
+    view: state.view,
+    search: state.search.trim(),
+    status: state.status,
+    libraryFilter: state.libraryFilter,
+    selectedCats: [...state.selectedCats].sort(),
+    catMode: state.catMode,
+    uncategorized: state.uncategorized,
+    tech: Object.fromEntries(tech),
+    focus: state.focus,
+    sort: state.sort,
+  };
+}
+
+/** Same filters (the sort order does not matter, nor how categories combine without any). */
+function sameFilter(a, b) {
+  const key = (f) => JSON.stringify([f.view, f.search || '', f.status || 'all', f.libraryFilter ?? null, f.selectedCats || [],
+    f.selectedCats?.length ? f.catMode : '', !!f.uncategorized, f.tech || {}, f.focus ? [f.focus.kind, f.focus.id] : null]);
+  return key(a) === key(b);
+}
+
+/** Movies or shows (by `f.view`) passing the filter object `f`, sorted. */
+function itemsFor(f) {
+  const q = normalize((f.search || '').trim());
+  const status = STATUS_FILTERS.find((s) => s.id === f.status) || STATUS_FILTERS[0];
+  const cats = f.selectedCats || [];
+  const tech = Object.entries(f.tech || {}).map(([group, values]) => [group, new Set(values)]);
+  const lib = f.libraryFilter ?? null;
+  return (f.view === 'shows' ? showItems : movieItems)
     .filter((m) => {
       if (!status.test(m)) return false;
-      if (state.libraryFilter !== null && !(m.isShow ? m.libraryIds.has(state.libraryFilter) : m.libraryId === state.libraryFilter)) return false;
-      if (state.uncategorized && m.categories.length) return false;
+      if (lib !== null && !(m.isShow ? m.libraryIds.has(lib) : m.libraryId === lib)) return false;
+      if (f.uncategorized && m.categories.length) return false;
       if (cats.length) {
         const has = (c) => m.categories.includes(c);
-        if (state.catMode === 'all' ? !cats.every(has) : !cats.some(has)) return false;
+        if (f.catMode === 'all' ? !cats.every(has) : !cats.some(has)) return false;
       }
-      if (state.focus && !matchesFocus(m)) return false;
+      if (f.focus && !matchesFocus(m, f.focus)) return false;
       // Any selected value within a group, every group with a selection.
-      for (const [group, selected] of Object.entries(state.tech)) {
+      for (const [group, selected] of tech) {
         if (selected.size && !techValues(m, group).some((v) => selected.has(v))) return false;
       }
       if (q) {
-        const words = [m.title, m.originalTitle, m.year, m.director, m.fileName, m.folder, ...m.genres, ...(m.cast || []).map((p) => p.name)];
+        const words = [m.title, m.originalTitle, m.year, m.director, m.fileName, m.folder, m.note, ...m.genres, ...(m.cast || []).map((p) => p.name)];
         if (m.isShow) words.push(...m.episodes.map((e) => e.title));
         if (!normalize(words.filter(Boolean).join(' ')).includes(q)) return false;
       }
       return true;
     })
-    .sort(SORTS[state.sort]);
+    .sort(SORTS[f.sort] || SORTS.title);
+}
+
+function filtered() {
+  return itemsFor(currentFilter());
 }
 
 const techCount = () => Object.values(state.tech).reduce((n, s) => n + s.size, 0);
@@ -515,6 +554,7 @@ function renderSidebar() {
     </button>`;
 
   renderTechFilters(items);
+  renderSavedFilters();
   renderSectionToggles();
 
   for (const b of document.querySelectorAll('#cat-mode button')) {
@@ -524,6 +564,101 @@ function renderSidebar() {
   $('#sort').value = state.sort;
   const active = (state.status !== 'all') + state.selectedCats.size + state.uncategorized + (state.libraryFilter !== null) + techCount() + !!state.focus;
   $('#filters-count').textContent = active || '';
+}
+
+// ---------- saved filters ----------
+
+function renderSavedFilters() {
+  const current = currentFilter();
+  $('#saved-list').innerHTML = state.savedFilters.length
+    ? state.savedFilters.map((s, i) => `
+      <button class="filter ${sameFilter(s.filter, current) ? 'active' : ''}" data-saved-i="${i}" title="${esc(savedFilterSummary(s.filter))}">
+        <span class="dot" style="background:${s.filter.view === 'shows' ? 'var(--accent-2)' : 'var(--text-3)'}"></span>
+        <span class="name">${esc(s.name)}</span>
+        <span class="count">${itemsFor(s.filter).length}</span>
+        <span class="cat-actions">
+          <span data-act="rename" title="${t('Přejmenovat')}">${ICONS.edit}</span>
+          <span data-act="delete" title="${t('Smazat filtr')}">${ICONS.trash}</span>
+        </span>
+      </button>`).join('')
+    : `<div class="empty-cats">${t('Nastavte filtry a uložte je tlačítkem „+ Uložit“.')}</div>`;
+}
+
+/** Readable description of a filter ("Seriály · Neviděné · Komedie, Drama · 4K"). */
+function savedFilterSummary(f) {
+  const status = STATUS_FILTERS.find((s) => s.id === f.status);
+  const parts = [t(VIEWS[f.view]?.label || 'Filmy')];
+  if (status && status.id !== 'all') parts.push(t(typeof status.label === 'function' ? status.label() : status.label));
+  if (f.selectedCats?.length) parts.push(f.selectedCats.join(f.catMode === 'all' ? ' + ' : ', '));
+  if (f.uncategorized) parts.push(t('Bez kategorie'));
+  for (const [group, values] of Object.entries(f.tech || {})) parts.push(values.map((v) => techLabel(group, v)).join(', '));
+  if (f.libraryFilter != null) parts.push(state.libraries.find((l) => l.id === f.libraryFilter)?.name || t('složka'));
+  if (f.focus) parts.push(f.focus.name);
+  if (f.search) parts.push(`„${f.search}“`);
+  return parts.join(' · ');
+}
+
+function applySavedFilter(f) {
+  state.view = VIEWS[f.view] ? f.view : 'movies';
+  state.showId = null;
+  state.detailId = null;
+  state.selection.clear();
+  state.search = f.search || '';
+  $('#search').value = state.search;
+  state.status = STATUS_FILTERS.some((s) => s.id === f.status) ? f.status : 'all';
+  state.libraryFilter = state.libraries.some((l) => l.id === f.libraryFilter) ? f.libraryFilter : null;
+  state.selectedCats = new Set((f.selectedCats || []).filter((c) => state.categories.includes(c)));
+  state.catMode = f.catMode === 'all' ? 'all' : 'any';
+  state.uncategorized = !!f.uncategorized;
+  state.tech = Object.fromEntries(Object.entries(f.tech || {}).map(([group, values]) => [group, new Set(values)]));
+  state.focus = f.focus || null;
+  if (SORTS[f.sort]) state.sort = f.sort;
+  savePrefs();
+  render();
+}
+
+async function saveCurrentFilter() {
+  if (!hasFilters()) {
+    toast(t('Nejdřív nastavte filtry, které chcete uložit.'));
+    return;
+  }
+  const f = currentFilter();
+  const name = await modal({
+    title: t('Uložit filtry'),
+    text: savedFilterSummary(f),
+    input: savedFilterSummary(f).split(' · ').slice(1).join(' · ').slice(0, 60),
+    okLabel: t('Uložit'),
+  });
+  if (!name?.trim()) return;
+  const list = await call('save_filter', { name, filter: f });
+  if (list) {
+    state.savedFilters = list;
+    render();
+    toast(t('Filtr „{name}“ je uložený.', { name: name.trim() }), 'ok');
+  }
+}
+
+async function onSavedFilterClick(e) {
+  const row = e.target.closest('[data-saved-i]');
+  if (!row) return;
+  const saved = state.savedFilters[+row.dataset.savedI];
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (act === 'rename') {
+    const name = await modal({ title: t('Přejmenovat filtr'), input: saved.name, okLabel: t('Přejmenovat') });
+    if (!name?.trim() || name.trim() === saved.name) return;
+    const list = await call('rename_filter', { name: saved.name, newName: name });
+    if (list) { state.savedFilters = list; render(); }
+  } else if (act === 'delete') {
+    const ok = await modal({ title: t('Smazat filtr „{name}“?', { name: saved.name }), text: t('Filmy ani kategorie se nezmění.'), okLabel: t('Smazat'), danger: true });
+    if (!ok) return;
+    const list = await call('delete_filter', { name: saved.name });
+    if (list) { state.savedFilters = list; render(); }
+  } else if (sameFilter(saved.filter, currentFilter())) {
+    clearFilters();
+  } else {
+    applySavedFilter(saved.filter);
+  }
+  if (compactQuery.matches && !act) setFiltersOpen(false);
 }
 
 /** Tooltip of the play button: what will be played. */
@@ -544,6 +679,7 @@ function posterHtml(m, withControls, selectable = withControls) {
   else if (m.playing) badge = `<span class="badge live">${t('Přehrává se')}</span>`;
   else if (m.watched) badge = `<span class="badge done">✓ ${t('Zhlédnuto')}</span>`;
   else if (isNew(m)) badge = `<span class="badge new">${m.isShow ? t('Nové díly') : t('Nový')}</span>`;
+  else if (m.wishlist) badge = `<span class="badge wish">${t('Chci vidět')}</span>`;
   const kind = m.poster ? m.posterKind : '';
   return `
     <div class="poster ${kind}" style="--h:${hue(m.title)}">
@@ -615,9 +751,10 @@ function renderGrid() {
   grid.innerHTML = homeRowsHtml() + visible.map((m, i) => {
     const pct = itemPercent(m);
     const rating = m.rating ? `★ ${num(m.rating, 1)}` : null;
+    const mine = m.myRating ? `<span class="mine" title="${t('Moje hodnocení')}">♥ ${m.myRating}/5</span>` : null;
     const meta = (m.isShow
-      ? [m.year, rating, `${m.seasons.length} ${plural(m.seasons.length, 'sezóna', 'sezóny', 'sezón')}`, `${m.episodeCount} ${plural(m.episodeCount, 'epizoda', 'epizody', 'epizod')}`]
-      : [m.year, rating, techBadge(m) ? `<span class="tech">${techBadge(m)}</span>` : null, fmtSize(m.size)]).filter(Boolean).join(' · ');
+      ? [m.year, mine, rating, `${m.seasons.length} ${plural(m.seasons.length, 'sezóna', 'sezóny', 'sezón')}`, `${m.episodeCount} ${plural(m.episodeCount, 'epizoda', 'epizody', 'epizod')}`]
+      : [m.year, mine, rating, techBadge(m) ? `<span class="tech">${techBadge(m)}</span>` : null, fmtSize(m.size)]).filter(Boolean).join(' · ');
     const progress = m.isShow
       ? m.inProgress ? ` · <span class="accent">${m.watchedCount}/${m.episodeCount}</span>` : ''
       : pct > 0 ? ` · <span class="accent">${Math.round(pct)} %</span>` : '';
@@ -661,6 +798,63 @@ function metaSectionHtml(m) {
   })}</div>`;
 }
 
+/** Want to watch, own rating (1–5) and a private note of a movie or show. */
+function personalHtml(m, noteId) {
+  const stars = [1, 2, 3, 4, 5].map((n) => `
+    <button class="star ${n <= (m.myRating || 0) ? 'on' : ''}" data-personal="star" data-n="${n}"
+      title="${n === m.myRating ? t('Zrušit hodnocení') : t('{n} z 5', { n })}">♥</button>`).join('');
+  return `
+    <div class="personal">
+      <button class="btn small wish ${m.wishlist ? 'on' : ''}" data-personal="wish">${m.wishlist ? `✓ ${t('Chci vidět')}` : `+ ${t('Chci vidět')}`}</button>
+      <div class="stars" role="group" aria-label="${t('Moje hodnocení')}">${stars}</div>
+    </div>
+    <textarea id="${noteId}" class="note" data-note data-item="${m.isShow ? 's' : 'm'}${m.id}" rows="2" maxlength="4000" spellcheck="true" placeholder="${t('Poznámka – vidíte ji jen vy…')}">${esc(m.note || '')}</textarea>`;
+}
+
+async function savePersonal(m, change) {
+  // The current state: `m` may be a copy from an earlier render.
+  const cur = (m.isShow ? showById(m.id) : movieById(m.id)) || m;
+  const value = { wishlist: !!cur.wishlist, rating: cur.myRating || 0, note: cur.note || '', ...change };
+  const u = await call(m.isShow ? 'set_show_personal' : 'set_movie_personal', { id: m.id, ...value });
+  if (u) (m.isShow ? updateShow : updateMovie)(u);
+}
+
+/** Handles a click on the wishlist button or a heart; true when it was one. */
+function onPersonalClick(e, m) {
+  const btn = e.target.closest('[data-personal]');
+  if (!btn) return false;
+  if (btn.dataset.personal === 'wish') savePersonal(m, { wishlist: !m.wishlist });
+  else savePersonal(m, { rating: +btn.dataset.n === m.myRating ? 0 : +btn.dataset.n });
+  return true;
+}
+
+let noteTimer = null;
+
+/** Movie or show a note field belongs to (`data-item` "m12" / "s34"). */
+function noteItem(el) {
+  const ref = el.dataset.item || '';
+  const id = +ref.slice(1);
+  return ref[0] === 's' ? showById(id) : movieById(id);
+}
+
+/**
+ * Saves a changed note shortly after typing stops, and when leaving the field – always to
+ * the movie or show the field belongs to, even when the detail switched meanwhile.
+ */
+function onNoteEvent(e) {
+  if (!e.target.matches?.('[data-note]')) return false;
+  clearTimeout(noteTimer);
+  const text = e.target.value;
+  const field = e.target;
+  const save = () => {
+    const cur = noteItem(field);
+    if (cur && text.trim() !== (cur.note || '')) savePersonal(cur, { note: text });
+  };
+  if (e.type === 'input') noteTimer = setTimeout(save, 800);
+  else save();
+  return true;
+}
+
 /** Category toggles and the form for a new one. */
 function categoriesHtml(m, inputId) {
   return `
@@ -673,17 +867,27 @@ function categoriesHtml(m, inputId) {
     </form>`;
 }
 
-/** Re-renders `container` keeping its scroll position and a half-typed text in `inputId`. */
-function keepingInput(container, inputId, draw) {
-  const oldInput = document.getElementById(inputId);
-  const draft = oldInput?.value || '';
-  const hadFocus = oldInput && document.activeElement === oldInput;
+/**
+ * Re-renders `container` keeping its scroll position and half-typed texts: the inputs in
+ * `inputIds` keep their text; a textarea (the note) only while it is being typed in and
+ * only when it still belongs to the same movie or show (`data-item`).
+ */
+function keepingInput(container, inputIds, draw) {
+  const kept = [].concat(inputIds).map((id) => {
+    const el = document.getElementById(id);
+    const focused = !!el && document.activeElement === el;
+    return { id, focused, item: el?.dataset.item, keep: !!el && (focused || el.tagName !== 'TEXTAREA'), value: el?.value || '', caret: el?.selectionStart };
+  });
   const scroll = container.scrollTop;
   draw();
-  const input = document.getElementById(inputId);
-  if (input) {
-    input.value = draft;
-    if (hadFocus) input.focus();
+  for (const k of kept) {
+    const el = document.getElementById(k.id);
+    if (!el || !k.keep || el.dataset.item !== k.item) continue;
+    el.value = k.value;
+    if (k.focused) {
+      el.focus();
+      if (k.caret != null) el.setSelectionRange(k.caret, k.caret);
+    }
   }
   container.scrollTop = scroll;
 }
@@ -742,7 +946,7 @@ function renderShowPage() {
   const missing = [];
   for (let n = 1; n <= season.total; n++) if (!have.has(n)) missing.push(n);
 
-  keepingInput(page, 'show-cat-input', () => {
+  keepingInput(page, ['show-cat-input', 'show-note-input'], () => {
     page.classList.remove('hidden');
     page.innerHTML = `
       <button class="back-btn" data-act="back">${ICONS.back} ${t('Všechny seriály')}</button>
@@ -752,6 +956,7 @@ function renderShowPage() {
           <h1>${esc(s.title)}</h1>
           ${s.originalTitle ? `<div class="original-title">${esc(s.originalTitle)}</div>` : ''}
           <div class="facts">${facts.join('')}</div>
+          ${airingHtml(s)}
           ${s.creators ? `<div class="muted" style="margin-top:6px">${t('Tvůrci')}: ${s.creatorList?.length ? s.creatorList.map(personLink).join(', ') : esc(s.creators)}</div>` : ''}
           ${s.genres.length ? `<div class="genres">${s.genres.map((g) => `<span class="chip">${esc(g)}</span>`).join('')}</div>` : ''}
           ${s.overview ? `<div class="overview">${esc(s.overview)}</div>` : ''}
@@ -764,6 +969,10 @@ function renderShowPage() {
       </div>
 
       <div class="show-panels">
+        <div class="panel">
+          <h3>${t('Moje hodnocení')}</h3>
+          ${personalHtml(s, 'show-note-input')}
+        </div>
         <div class="panel">
           <h3>${t('Kategorie')}</h3>
           ${categoriesHtml(s, 'show-cat-input')}
@@ -803,6 +1012,53 @@ function renderShowPage() {
         list: missing.length > 20 ? `${missing.length} ${plural(missing.length, 'epizoda', 'epizody', 'epizod')}` : missing.map((n) => `E${pad2(n)}`).join(', '),
       })}</div>` : ''}`;
   });
+}
+
+// ---------- upcoming episodes (TMDB next_episode_to_air) ----------
+
+/** Days from today to a "YYYY-MM-DD" date (negative = in the past). */
+function daysUntil(date) {
+  const [y, m, d] = date.split('-').map(Number);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((new Date(y, m - 1, d) - today) / 86400000);
+}
+
+/** "dnes", "zítra", "čt 12. 11." – how far a release date is. */
+function airDateLabel(date, withYear = false) {
+  const days = daysUntil(date);
+  if (days === 0) return t('dnes');
+  if (days === 1) return t('zítra');
+  if (days === -1) return t('včera');
+  const [y, m, d] = date.split('-').map(Number);
+  const options = { day: 'numeric', month: 'numeric', ...(withYear ? { year: 'numeric' } : {}), ...(days > 0 && days < 7 ? { weekday: 'short' } : {}) };
+  return new Date(y, m - 1, d).toLocaleDateString(locale(), options);
+}
+
+const genericEpisodeName = (name) => !name || /^(epizoda|episode|díl)\s*\d+$/i.test(name.trim());
+
+/** The line on the show page about the next episode, or that the series ended. */
+function airingHtml(s) {
+  const n = s.nextEpisode;
+  if (n) {
+    const code = epCode({ season: n.season, episode: n.episode });
+    const name = genericEpisodeName(n.title) ? '' : ` „${esc(n.title)}“`;
+    const days = daysUntil(n.airDate);
+    const when = days < 0
+      ? t('vyšel {date}', { date: airDateLabel(n.airDate, true) })
+      : days === 0 ? t('vychází dnes') : t('vyjde {date}', { date: airDateLabel(n.airDate, true) });
+    return `<div class="next-air ${days <= 0 ? 'out' : ''}">${t('Další díl {code}{name} {when}', { code, name, when })}</div>`;
+  }
+  if (s.status === 'Ended') return `<div class="next-air ended">${t('Seriál je ukončený.')}</div>`;
+  if (s.status === 'Canceled') return `<div class="next-air ended">${t('Seriál byl zrušen.')}</div>`;
+  return '';
+}
+
+/** Shows whose next episode aired in the last week or comes within a month, soonest first. */
+function upcomingShows() {
+  return showItems
+    .filter((s) => s.nextEpisode && daysUntil(s.nextEpisode.airDate) >= -7 && daysUntil(s.nextEpisode.airDate) <= 30)
+    .sort((a, b) => a.nextEpisode.airDate.localeCompare(b.nextEpisode.airDate) || byTitle(a, b));
 }
 
 function episodeRow(e) {
@@ -904,6 +1160,9 @@ function renderDetail() {
       </div>
     </div>
 
+    <h3>${t('Moje hodnocení')}</h3>
+    ${personalHtml(m, 'note-input')}
+
     ${IS_ANDROID ? '' : `<h3>${t('Zvuk a titulky')}</h3>${tracksHtml(m)}`}
 
     <h3>${t('Kategorie')}</h3>
@@ -922,10 +1181,16 @@ function renderDetail() {
     ${metaSectionHtml(m)}`;
 
   // Keep a half-typed category name across re-renders (progress updates arrive while open).
-  keepingInput(drawer, 'new-cat-input', () => {
+  keepingInput(drawer, ['new-cat-input', 'note-input'], () => {
     drawer.classList.remove('hidden');
     $('#drawer-content').innerHTML = html;
   });
+}
+
+/** Every selected movie or show is on the "want to watch" list. */
+function selectionWished() {
+  const items = viewItems().filter((m) => state.selection.has(m.id));
+  return items.length > 0 && items.every((m) => m.wishlist);
 }
 
 function renderBulkBar() {
@@ -948,6 +1213,7 @@ function renderBulkBar() {
     <button class="btn small primary" data-act="bulk-add">${t('Přidat')}</button>
     <button class="btn small" data-act="bulk-remove">${t('Odebrat')}</button>
     <span class="sep"></span>
+    <button class="btn small" data-act="bulk-wish">${selectionWished() ? t('Odebrat z Chci vidět') : `+ ${t('Chci vidět')}`}</button>
     <button class="btn small" data-act="bulk-meta" title="${t('Znovu vyhledat informace a plakáty')}">${t('Načíst informace')}</button>
     <button class="btn small" data-act="select-all">${t('Vybrat vše')}</button>
     <button class="btn small" data-act="clear-selection">${t('Zrušit výběr')}</button>`;
@@ -1325,6 +1591,7 @@ function renderTechFilters(items) {
 
 /** Number of active filters of each collapsible section. */
 const SECTION_FILTERS = {
+  saved: () => +state.savedFilters.some((s) => sameFilter(s.filter, currentFilter())),
   status: () => +(state.status !== 'all'),
   libraries: () => +(state.libraryFilter !== null),
   cats: () => state.selectedCats.size + state.uncategorized,
@@ -2191,7 +2458,24 @@ function homeRowsHtml() {
     }));
   }
 
+  const upcoming = upcomingShows().slice(0, ROW_LIMIT);
+  if (upcoming.length) {
+    rows.push(rowHtml(t('Nové díly seriálů'), upcoming, (s) => {
+      const n = s.nextEpisode;
+      const days = daysUntil(n.airDate);
+      return `${epCode({ season: n.season, episode: n.episode })} · ${days < 0 ? t('vyšel {date}', { date: airDateLabel(n.airDate) }) : airDateLabel(n.airDate)}`;
+    }));
+  }
+
   const items = viewItems();
+  const wished = items
+    .filter((m) => m.wishlist && !m.watched)
+    .sort((a, b) => (b.myRating || 0) - (a.myRating || 0) || b.added - a.added)
+    .slice(0, ROW_LIMIT);
+  if (wished.length) {
+    rows.push(rowHtml(t('Chci vidět'), wished, (m) => (m.year ? String(m.year) : '')));
+  }
+
   const since = Date.now() / 1000 - 60 * 86400;
   const added = items
     .filter((m) => m.added >= since && firstAdded !== null && m.added - firstAdded > 12 * 3600)
@@ -2247,8 +2531,7 @@ function onRowCardClick(e) {
 // ---------- people, collections, similar titles ----------
 
 /** Movies and shows filtered to a person (actor, director, creator) or a movie series. */
-function matchesFocus(m) {
-  const f = state.focus;
+function matchesFocus(m, f = state.focus) {
   if (f.kind === 'collection') return !m.isShow && m.collection?.id === f.id;
   return [...(m.cast || []), ...(m.directors || m.creatorList || [])].some((p) => p.id === f.id);
 }
@@ -2811,6 +3094,8 @@ function bindEvents() {
     tip.style.top = `${Math.max(8, r.top - tip.offsetHeight - 6)}px`;
   });
   $('#btn-add-cat').addEventListener('click', () => createCategory());
+  $('#btn-save-filter').addEventListener('click', saveCurrentFilter);
+  $('#saved-list').addEventListener('click', onSavedFilterClick);
   $('#btn-clear-filters').addEventListener('click', clearFilters);
   $('#btn-filters').addEventListener('click', () => setFiltersOpen(true));
   $('#btn-close-filters').addEventListener('click', () => setFiltersOpen(false));
@@ -2935,6 +3220,7 @@ function bindEvents() {
     const s = openShow();
     if (!s) return;
     if (onLinkClick(e)) return;
+    if (onPersonalClick(e, s)) return;
     const chip = e.target.closest('[data-cat-i]');
     if (chip) return toggleCategory(s, sortedCats[+chip.dataset.catI]);
     const tab = e.target.closest('[data-season]');
@@ -2995,12 +3281,14 @@ function bindEvents() {
     const s = openShow();
     if (s && e.target.dataset.showTrack) setShowTracks(s, e.target);
   });
+  for (const type of ['input', 'focusout']) page.addEventListener(type, onNoteEvent);
 
   const drawer = $('#drawer-content');
   drawer.addEventListener('click', async (e) => {
     const m = movieById(state.detailId);
     if (!m) return;
     if (onLinkClick(e)) return;
+    if (onPersonalClick(e, m)) return;
     const chip = e.target.closest('[data-cat-i]');
     if (chip) return toggleCategory(m, sortedCats[+chip.dataset.catI]);
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -3039,12 +3327,16 @@ function bindEvents() {
     const m = movieById(state.detailId);
     if (m && e.target.dataset.track) setMovieTracks(m, e.target);
   });
+  for (const type of ['input', 'focusout']) drawer.addEventListener(type, onNoteEvent);
 
   $('#bulkbar').addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'bulk-add') bulkApply(true);
     if (act === 'bulk-remove') bulkApply(false);
     if (act === 'bulk-meta') startMetadata([...state.selection], true, true);
+    if (act === 'bulk-wish') {
+      call('bulk_set_wishlist', { ids: [...state.selection], wishlist: !selectionWished() }).then((data) => data && applyData(data));
+    }
     if (act === 'select-all') {
       for (const m of visible) state.selection.add(m.id);
       render();

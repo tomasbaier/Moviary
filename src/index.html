@@ -59,6 +59,20 @@
         </div>
 
         <!-- Sections collapse by a click on their heading (data-toggle, see renderSectionToggles). -->
+        <section id="saved-section" data-section="saved">
+          <div class="section-head">
+            <button class="section-toggle" data-toggle="saved" aria-expanded="true">
+              <h3 data-t>Uložené filtry</h3>
+              <span class="badge-n"></span>
+              <svg class="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+            <button id="btn-save-filter" class="mini" data-t data-t-title="Uložit aktuální filtry pod názvem" title="Uložit aktuální filtry pod názvem">+ Uložit</button>
+          </div>
+          <div class="section-body">
+            <div id="saved-list" class="filter-list"></div>
+          </div>
+        </section>
+
         <section id="status-section" data-section="status">
           <div class="section-head">
             <button class="section-toggle" data-toggle="status" aria-expanded="true">
@@ -138,6 +152,7 @@
               <option value="title" data-t>podle názvu</option>
               <option value="year" data-t>podle roku</option>
               <option value="rating" data-t>podle hodnocení</option>
+              <option value="mine" data-t>podle mého hodnocení</option>
               <option value="recent" data-t>naposledy přehrané</option>
               <option value="added" data-t>nově přidané</option>
               <option value="size" data-t>podle velikosti</option>

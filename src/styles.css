@@ -9,6 +9,7 @@
   --text-3: #6b7287;
   --accent: #ff5e62;
   --accent-2: #7c3aed;
+  --wish: #f59e0b;
   --accent-soft: rgba(255, 94, 98, 0.14);
   --ok: #34d399;
   --live: #38bdf8;
@@ -979,3 +980,25 @@ body.compact #btn-random span { display: none; }
 }
 .home-rows, .home-row, .grid-head { min-width: 0; }
 .drawer .row-scroll .row-card { width: 112px; }
+
+/* ---------- want to watch, own rating, note ---------- */
+.badge.wish { color: #1a1205; background: var(--wish); }
+.card-meta .mine { color: var(--wish); }
+.personal { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.personal .wish.on { border-color: var(--wish); color: var(--wish); }
+.stars { display: flex; gap: 2px; }
+.stars .star { border: 0; background: transparent; padding: 2px 3px; font-size: 20px; line-height: 1; color: var(--line); cursor: pointer; transition: color 0.1s, transform 0.1s; }
+.stars .star.on { color: var(--wish); }
+.stars:hover .star { color: var(--wish); }
+.stars .star:hover ~ .star { color: var(--line); }
+.stars .star:active { transform: scale(0.9); }
+textarea.note {
+  width: 100%; min-height: 54px; resize: vertical; box-sizing: border-box; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; outline: none;
+}
+textarea.note:focus { border-color: var(--accent); }
+
+/* ---------- upcoming episodes ---------- */
+.next-air { margin-top: 8px; font-size: 13px; color: var(--text-2); }
+.next-air.out { color: var(--ok); }
+.next-air.ended { color: var(--text-3); }

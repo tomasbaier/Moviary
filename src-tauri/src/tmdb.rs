@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::db::{self, Collection, CollectionPart, CollectionRef, EpisodeMeta, Meta, Person, SeasonMeta, META_VERSION};
+use crate::db::{self, NextEpisode, Collection, CollectionPart, CollectionRef, EpisodeMeta, Meta, Person, SeasonMeta, META_VERSION};
 
 const API: &str = "https://api.themoviedb.org/3";
 const IMAGES: &str = "https://image.tmdb.org/t/p";
@@ -42,6 +42,9 @@ pub struct ShowInfo {
     pub meta: Meta,
     pub seasons: Vec<SeasonMeta>,
     pub episodes: Vec<EpisodeMeta>,
+    /// "Returning Series", "Ended"…
+    pub status: String,
+    pub next_episode: Option<NextEpisode>,
 }
 
 /// Search result offered to the user when picking a match by hand.
@@ -276,6 +279,8 @@ impl Client {
             },
             seasons: season_list,
             episodes,
+            status: text(&v["status"]),
+            next_episode: next_episode(&v["next_episode_to_air"], en.next_episode),
         })
     }
 
@@ -342,6 +347,8 @@ struct English {
     genres: Vec<String>,
     /// Name of the movie series.
     collection: String,
+    /// Name of the next episode of a series.
+    next_episode: String,
 }
 
 impl English {
@@ -353,6 +360,7 @@ impl English {
                 overview: text(&v["overview"]),
                 genres: genres(&v),
                 collection: text(&v["belongs_to_collection"]["name"]),
+                next_episode: text(&v["next_episode_to_air"]["name"]),
             },
             // Missing English is filled in later by the metadata job.
             Err(_) => English {
@@ -361,9 +369,25 @@ impl English {
                 overview: String::new(),
                 genres: Vec::new(),
                 collection: String::new(),
+                next_episode: String::new(),
             },
         }
     }
+}
+
+/// The announced next episode, when TMDB knows its date.
+fn next_episode(v: &Value, name_en: String) -> Option<NextEpisode> {
+    let air_date = text(&v["air_date"]);
+    if air_date.len() < 10 {
+        return None;
+    }
+    Some(NextEpisode {
+        season: v["season_number"].as_u64()? as u32,
+        episode: v["episode_number"].as_u64()? as u32,
+        name: text(&v["name"]),
+        name_en,
+        air_date,
+    })
 }
 
 fn person(v: &Value) -> Person {
