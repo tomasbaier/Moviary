@@ -16,6 +16,7 @@ import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.result.ActivityResult
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -184,6 +185,23 @@ class FilmotekaPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.resolve()
     } catch (e: ActivityNotFoundException) {
       invoke.reject(tr("Není k dispozici žádný prohlížeč.", "No browser is available."))
+    }
+  }
+
+  /** Opens the package installer for a downloaded update (an APK in the cache folder). */
+  @Command
+  fun installApk(invoke: Invoke) {
+    val file = File(invoke.parseArgs(UriArgs::class.java).uri)
+    try {
+      val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
+      val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      activity.startActivity(intent)
+      invoke.resolve()
+    } catch (e: Exception) {
+      invoke.reject(tr("Instalaci nelze spustit: ${e.message}", "Cannot start the installation: ${e.message}"))
     }
   }
 

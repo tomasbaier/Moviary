@@ -202,6 +202,11 @@ pub fn install_vlc(app: &AppHandle) -> Result<(), String> {
     call::<serde_json::Value>(app, "openVlcStore", json!({})).map(|_| ())
 }
 
+/// Opens Android's package installer for a downloaded update.
+pub fn install_apk(app: &AppHandle, apk: &Path) -> Result<(), String> {
+    call::<serde_json::Value>(app, "installApk", json!({ "uri": apk.to_string_lossy() })).map(|_| ())
+}
+
 /// Opens a web page in the browser.
 pub fn open_url(app: &AppHandle, url: &str) -> Result<(), String> {
     call::<serde_json::Value>(app, "openUrl", json!({ "uri": url })).map(|_| ())

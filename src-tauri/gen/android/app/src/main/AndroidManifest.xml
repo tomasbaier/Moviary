@@ -4,6 +4,8 @@
     <!-- Reading the video files: "access to all files" on Android 11+, storage permission before. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- Installing an update downloaded from GitHub (the user confirms it in the system dialog). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Checking whether VLC for Android is installed (package visibility, Android 11+). -->
     <queries>

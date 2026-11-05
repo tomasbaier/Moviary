@@ -138,6 +138,12 @@ pub struct Settings {
     pub language: String,
     /// Scan automatically when files in the library folders change or a drive is connected.
     pub watch_folders: bool,
+    /// Look for a new version on GitHub once a day.
+    pub check_updates: bool,
+    /// Unix timestamp of the last successful update check.
+    pub update_checked: u64,
+    /// Version the user chose to skip; automatic checks do not offer it.
+    pub skipped_version: String,
 }
 
 impl Default for Settings {
@@ -151,6 +157,9 @@ impl Default for Settings {
             tracks: TrackRules::default(),
             language: String::new(),
             watch_folders: true,
+            check_updates: true,
+            update_checked: 0,
+            skipped_version: String::new(),
         }
     }
 }

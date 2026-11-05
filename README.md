@@ -83,6 +83,12 @@ Pro plakáty a popisy si vytvořte bezplatný API klíč na
 - Starší informace z TMDB (bez herců, sérií a doporučení) se doplní na pozadí podle známé shody.
   Stejně se obnoví údaje a plakáty starší než 150 dní – podmínky TMDB nedovolují ukládat jejich
   data déle než 6 měsíců (obnova běží s automatickým načítáním informací a s nastaveným klíčem).
+- Aktualizace: jednou denně se podívá do [GitHub Releases](../../releases), jestli nevyšla nová verze,
+  a nabídne ji i s poznámkami k vydání. Na Windows ji stáhne, ověří (velikost a SHA-256 z GitHubu),
+  nahradí jí běžící exe a restartuje se – zástupci dál fungují. Na Androidu stáhne APK a otevře
+  systémovou instalaci (napoprvé je potřeba povolit „Instalovat neznámé aplikace“). Verzi lze
+  přeskočit, kontrolu vypnout v Nastavení. Nové vydání musí mít tag `v<verze>` a soubory
+  `Moviary-<verze>-windows.exe` a `Moviary-<verze>-android.apk`.
 - O aplikaci (ikona ⓘ v horní liště, nebo z Nastavení): verze, upozornění TMDB s logem, VLC,
   soukromí a licence všech použitých knihoven.
 - Čeština a angličtina: přepínač v horní liště (CS / EN) a v Nastavení. Při prvním spuštění
@@ -190,7 +196,8 @@ bez reklam a nekomerční.
 ## Soukromí
 
 Moviary nemá účty, reklamy ani telemetrii. Připojuje se jen k `api.themoviedb.org` a
-`image.tmdb.org` (s vaším klíčem). Ostatní data – kategorie, pozice přehrávání, historie –
+`image.tmdb.org` (s vaším klíčem) a jednou denně k `api.github.com` kvůli kontrole nových verzí
+(v Nastavení lze vypnout). Ostatní data – kategorie, pozice přehrávání, historie –
 zůstávají v datovém souboru v počítači nebo telefonu. VLC běží jako samostatný program; jeho
 ovládací rozhraní poslouchá jen na `127.0.0.1` s náhodným heslem.
 

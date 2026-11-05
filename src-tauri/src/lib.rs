@@ -12,6 +12,7 @@ mod playback;
 mod scanner;
 mod tmdb;
 mod tracks;
+mod update;
 mod view;
 #[cfg(desktop)]
 mod vlc;
@@ -58,6 +59,7 @@ pub struct AppState {
     pub sessions: Mutex<HashMap<u64, f64>>,
     pub job: metadata::Job,
     pub watch: watch::Watch,
+    pub update: update::Updater,
 }
 
 #[derive(Serialize)]
@@ -77,6 +79,7 @@ struct SettingsView {
     genres_as_categories: bool,
     video_thumbnails: bool,
     watch_folders: bool,
+    check_updates: bool,
     tracks: tracks::TrackRules,
     /// Code and Czech name of the known languages.
     languages: Vec<(&'static str, &'static str)>,
@@ -100,6 +103,7 @@ fn settings_view(app: &AppHandle) -> SettingsView {
         genres_as_categories: db.settings.genres_as_categories,
         video_thumbnails: db.settings.video_thumbnails,
         watch_folders: db.settings.watch_folders,
+        check_updates: db.settings.check_updates,
         tracks: db.settings.tracks.clone(),
         languages: media::language_names(),
         backups_dir: state.backups_dir.to_string_lossy().to_string(),
@@ -602,6 +606,8 @@ const LINKS: &[(&str, &str)] = &[
     ("tmdb-terms", "https://www.themoviedb.org/api-terms-of-use"),
     ("videolan", "https://www.videolan.org/"),
     ("tauri", "https://tauri.app/"),
+    ("repo", "https://github.com/tomasbaier/Moviary"),
+    ("releases", "https://github.com/tomasbaier/Moviary/releases/latest"),
 ];
 
 /// Opens one of [`LINKS`] in the default browser.
@@ -622,6 +628,30 @@ async fn open_link(app: AppHandle, link: String) -> Result<(), String> {
         // Explorer hands a URL to the default browser.
         std::process::Command::new("explorer").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
+}
+
+// ---------- updates ----------
+
+/// Newer release on GitHub, or None. `manual` ignores the setting, the daily interval and a
+/// skipped version.
+#[tauri::command]
+async fn check_update(app: AppHandle, manual: bool) -> Result<Option<update::UpdateInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || update::check(&app, manual))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Downloads and installs the release found by the last check (restarts the app on Windows).
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || update::install(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn skip_update(app: AppHandle, version: String) -> Result<(), String> {
+    update::skip(&app, version)
 }
 
 // ---------- Android ----------
@@ -824,6 +854,7 @@ async fn set_options(
     genres_as_categories: bool,
     video_thumbnails: bool,
     watch_folders: bool,
+    check_updates: Option<bool>,
 ) -> Result<SettingsView, String> {
     {
         let state = app.state::<AppState>();
@@ -832,6 +863,9 @@ async fn set_options(
         db.settings.genres_as_categories = genres_as_categories;
         db.settings.video_thumbnails = video_thumbnails;
         db.settings.watch_folders = watch_folders;
+        if let Some(check_updates) = check_updates {
+            db.settings.check_updates = check_updates;
+        }
         db.save(&state.db_path)?;
     }
     watch::update(&app);
@@ -884,13 +918,18 @@ pub fn run() {
                 sessions: Mutex::new(HashMap::new()),
                 job: metadata::Job::default(),
                 watch: watch::Watch::default(),
+                update: update::Updater::default(),
             });
             watch::start(app.handle());
+            update::cleanup(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_data,
             open_link,
+            check_update,
+            install_update,
+            skip_update,
             scan,
             add_library,
             relocate_library,

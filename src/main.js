@@ -1183,6 +1183,17 @@ async function openSettings() {
 
       ${android ? '' : trackRulesHtml(s.tracks)}
 
+      <div class="setting">
+        <div class="title">${t('Aktualizace')}</div>
+        <div class="value">${t('Verze {version}', { version: esc(s.version || '') })}</div>
+        <label class="check-row" style="margin-top:0"><input type="checkbox" data-opt="checkUpdates" ${s.checkUpdates ? 'checked' : ''} />
+          <span>${t('Hlídat nové verze')}<small>${t('Jednou denně se podívá na GitHub, jestli nevyšla nová verze, a nabídne její instalaci.')}</small></span></label>
+        <div class="row" style="margin-top:10px">
+          <button class="btn small" data-act="check-update">${t('Zkontrolovat teď')}</button>
+          <button class="btn small" type="button" data-link="releases">${t('Stránka vydání')}</button>
+        </div>
+      </div>
+
       ${await backupsHtml(android)}
 
       <div class="setting">
@@ -1236,6 +1247,7 @@ async function openSettings() {
     const act = btn.dataset.act;
     const id = btn.dataset.id ? +btn.dataset.id : null;
     if (act === 'about') return openAbout();
+    if (act === 'check-update') return checkForUpdate(true);
     if (await onTrackRulesClick(btn, draw)) return;
     if (await onBackupClick(btn, draw)) return;
     if (act === 'close') close();
@@ -1864,7 +1876,7 @@ async function openAbout() {
 
     <div class="setting">
       <div class="title">${t('Soukromí')}</div>
-      <div class="muted">${t('Moviary nemá účty, reklamy ani sběr statistik. Do internetu se připojuje jen k TMDB (s vaším klíčem). Kategorie, pozice přehrávání a ostatní data zůstávají v tomto zařízení.')}</div>
+      <div class="muted">${t('Moviary nemá účty, reklamy ani sběr statistik. Do internetu se připojuje jen k TMDB (s vaším klíčem) a ke GitHubu kvůli kontrole nových verzí (lze vypnout v Nastavení). Kategorie, pozice přehrávání a ostatní data zůstávají v tomto zařízení.')}</div>
     </div>
 
     <div class="setting">
@@ -1875,7 +1887,11 @@ async function openAbout() {
         <button class="btn small" data-link="tauri">tauri.app</button>
       </div>
     </div>
-    <div class="modal-actions"><button class="btn primary" data-act="close">${t('Zavřít')}</button></div>`, { wide: true, extraClass: 'about' });
+    <div class="modal-actions">
+      <button class="btn" data-link="repo" style="margin-right:auto">GitHub</button>
+      <button class="btn" data-act="check-update">${t('Zkontrolovat aktualizace')}</button>
+      <button class="btn primary" data-act="close">${t('Zavřít')}</button>
+    </div>`, { wide: true, extraClass: 'about' });
 
   el.addEventListener('click', (e) => {
     const link = e.target.closest('[data-link]');
@@ -1883,6 +1899,83 @@ async function openAbout() {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'close') close();
     else if (act === 'licenses') openLicenses();
+    else if (act === 'check-update') checkForUpdate(true);
+  });
+}
+
+// ---------- updates (GitHub Releases, see update.rs) ----------
+
+/** Asks GitHub for a newer version; `manual` also reports when there is none. */
+async function checkForUpdate(manual) {
+  let info;
+  try {
+    info = manual
+      ? await withLoading(t('Hledám novou verzi…'), () => invoke('check_update', { manual }))
+      : await invoke('check_update', { manual });
+  } catch (err) {
+    if (manual) toast(String(err), 'error');
+    return;
+  }
+  if (info) openUpdate(info);
+  else if (manual) toast(t('Máte nejnovější verzi {version}.', { version: state.settings?.version || '' }), 'ok');
+}
+
+function openUpdate(info) {
+  const android = IS_ANDROID;
+  const installLabel = !info.canInstall
+    ? t('Otevřít stránku ke stažení')
+    : android ? t('Stáhnout a nainstalovat') : t('Aktualizovat a restartovat');
+  const { el, close } = openModal(`
+    <h2>${t('Je k dispozici nová verze {version}', { version: esc(info.version) })}</h2>
+    <p>${t('Teď máte verzi {current}.', { current: esc(info.current) })}
+      ${info.canInstall ? (android
+        ? t('Aktualizace se stáhne ({size}) a Android se zeptá na její instalaci; data zůstanou zachovaná.', { size: fmtSize(info.size) })
+        : t('Aktualizace se stáhne ({size}), program se nahradí novou verzí a znovu spustí; data zůstanou zachovaná.', { size: fmtSize(info.size) }))
+      : t('Novou verzi stáhněte ze stránky vydání.')}</p>
+    ${info.notes ? `<div class="title">${t('Co je nového')}</div><pre class="release-notes">${esc(info.notes)}</pre>` : ''}
+    <div class="update-progress" hidden><div class="bar"><div></div></div><div class="muted"></div></div>
+    <div class="modal-actions">
+      <button class="btn" data-act="skip" style="margin-right:auto">${t('Přeskočit tuto verzi')}</button>
+      ${info.canInstall ? `<button class="btn" data-link="releases">${t('Stránka vydání')}</button>` : ''}
+      <button class="btn" data-act="later">${t('Později')}</button>
+      <button class="btn primary" data-act="install">${installLabel}</button>
+    </div>`, { wide: true, extraClass: 'update' });
+
+  const progress = el.querySelector('.update-progress');
+  const buttons = [...el.querySelectorAll('.modal-actions button')];
+  state.updateProgress = (p) => {
+    progress.hidden = false;
+    progress.querySelector('.bar > div').style.width = `${p.total ? Math.round((p.done / p.total) * 100) : 0}%`;
+    progress.querySelector('.muted').textContent = `${fmtSize(p.done)} / ${fmtSize(p.total)}`;
+  };
+
+  el.addEventListener('click', async (e) => {
+    const link = e.target.closest('[data-link]');
+    if (link) return openLink(link.dataset.link);
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'later') close();
+    else if (act === 'skip') {
+      await call('skip_update', { version: info.version });
+      close();
+    } else if (act === 'install') {
+      if (!info.canInstall) {
+        openLink('releases');
+        return close();
+      }
+      buttons.forEach((b) => { b.disabled = true; });
+      state.updateProgress({ done: 0, total: info.size });
+      try {
+        await invoke('install_update');
+        // Windows restarts into the new version; Android shows its installer.
+        progress.querySelector('.muted').textContent = android
+          ? t('Potvrďte instalaci v okně Androidu.')
+          : t('Spouštím novou verzi…');
+      } catch (err) {
+        toast(String(err), 'error');
+        progress.hidden = true;
+        buttons.forEach((b) => { b.disabled = false; });
+      }
+    }
   });
 }
 
@@ -3013,6 +3106,7 @@ async function init() {
   });
   await listen('metadata-progress', (e) => onJobProgress(e.payload));
   await listen('play-error', (e) => toast(String(e.payload), 'error'));
+  await listen('update-progress', (e) => state.updateProgress?.(e.payload));
   await listen('library-changed', async (e) => {
     const data = await call('get_data');
     if (data) applyData(data);
@@ -3038,6 +3132,8 @@ async function init() {
     if (state.libraries.some((l) => !l.uri)) await ensureStorage();
     await rescan();
   }
+  // Quietly, a bit after start; at most once a day (decided by the backend).
+  setTimeout(() => checkForUpdate(false), 5000);
 }
 
 init();
