@@ -1,0 +1,4 @@
+# Line endings are normalised to LF in the repository.
+* text=auto
+# Shell script run on Linux/macOS (e.g. CI) must keep LF.
+gradlew text eol=lf

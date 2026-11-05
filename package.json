@@ -1,0 +1,17 @@
+{
+  "name": "filmoteka",
+  "private": true,
+  "version": "1.5.0",
+  "license": "MIT",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "node scripts/licenses.js && tauri build --no-bundle && node scripts/release.js exe",
+    "android:dev": "tauri android dev",
+    "android:build": "node scripts/licenses.js && node scripts/android-build.js",
+    "licenses": "node scripts/licenses.js"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

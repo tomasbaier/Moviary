@@ -1,0 +1,170 @@
+﻿<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Filmotéka</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Texts are Czech; elements with data-t / data-t-title / data-t-placeholder are translated by i18n.js. -->
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" class="brand-icon" aria-hidden="true">
+          <rect x="2" y="3" width="20" height="18" rx="4" />
+          <path d="M10 8.5v7l6-3.5z" fill="#fff" />
+        </svg>
+        <span data-t>Filmotéka</span>
+      </div>
+      <div class="mode-tabs" id="mode-tabs"></div>
+      <div class="job" id="job"></div>
+      <div class="topbar-actions">
+        <button id="btn-add-library" class="btn">
+          <svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5zM12 10.5v5M9.5 13h5" /></svg>
+          <span data-t>Přidat složku</span>
+        </button>
+        <button id="btn-rescan" class="btn icon" data-t-title="Znovu prohledat složky (F5)" title="Znovu prohledat složky (F5)">
+          <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" /></svg>
+        </button>
+        <button id="btn-stats" class="btn icon" data-t-title="Statistiky" title="Statistiky">
+          <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>
+        </button>
+        <button id="btn-duplicates" class="btn icon" data-t-title="Duplicity" title="Duplicity">
+          <svg viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></svg>
+        </button>
+        <button id="btn-lang" class="btn lang-btn" title="Jazyk / Language">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
+          <span id="lang-code">CS</span>
+        </button>
+        <button id="btn-about" class="btn icon" data-t-title="O aplikaci" title="O aplikaci">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.01" /></svg>
+        </button>
+        <button id="btn-settings" class="btn icon" data-t-title="Nastavení" title="Nastavení">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <b data-t>Filtry</b>
+          <button id="btn-close-filters" class="btn icon" data-t-title="Zavřít" title="Zavřít">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <div class="search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+          <input id="search" type="search" data-t-placeholder="Hledat film, seriál, režiséra…  (Ctrl+F)" placeholder="Hledat film, seriál, režiséra…  (Ctrl+F)" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <!-- Sections collapse by a click on their heading (data-toggle, see renderSectionToggles). -->
+        <section id="status-section" data-section="status">
+          <div class="section-head">
+            <button class="section-toggle" data-toggle="status" aria-expanded="true">
+              <h3 data-t>Stav</h3>
+              <span class="badge-n"></span>
+              <svg class="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+          </div>
+          <div class="section-body">
+            <div id="status-filters" class="filter-list"></div>
+          </div>
+        </section>
+
+        <section id="libraries-section" data-section="libraries">
+          <div class="section-head">
+            <button class="section-toggle" data-toggle="libraries" aria-expanded="true">
+              <h3 data-t>Složky</h3>
+              <span class="badge-n"></span>
+              <svg class="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+            <button id="btn-add-library-2" class="mini" data-t>+ Přidat</button>
+          </div>
+          <div class="section-body">
+            <div id="library-list" class="filter-list"></div>
+          </div>
+        </section>
+
+        <section class="cats-section" id="cats-section" data-section="cats">
+          <div class="section-head">
+            <button class="section-toggle" data-toggle="cats" aria-expanded="true">
+              <h3 data-t>Kategorie</h3>
+              <span class="badge-n"></span>
+              <svg class="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+            <button id="btn-add-cat" class="mini" data-t>+ Nová</button>
+          </div>
+          <div class="section-body">
+          <div class="mode-toggle" id="cat-mode" data-t-title="Jak kombinovat více vybraných kategorií" title="Jak kombinovat více vybraných kategorií">
+            <button data-mode="any" data-t data-t-title="Má alespoň jednu z vybraných kategorií" title="Má alespoň jednu z vybraných kategorií">Kterákoli</button>
+            <button data-mode="all" data-t data-t-title="Má všechny vybrané kategorie" title="Má všechny vybrané kategorie">Všechny</button>
+          </div>
+          <div id="cat-list" class="filter-list"></div>
+          </div>
+        </section>
+
+        <section id="tech-section" class="hidden" data-section="tech">
+          <div class="section-head">
+            <button class="section-toggle" data-toggle="tech" aria-expanded="true">
+              <h3 data-t>Technické</h3>
+              <span class="badge-n"></span>
+              <svg class="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+          </div>
+          <div class="section-body">
+            <div id="tech-filters"></div>
+          </div>
+        </section>
+
+        <button id="btn-clear-filters" class="link hidden" data-t>Zrušit všechny filtry</button>
+      </aside>
+
+      <main class="content">
+        <div class="toolbar">
+          <button id="btn-filters" class="btn filters-btn" data-t-title="Filtry" title="Filtry">
+            <svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z" /></svg>
+            <span class="n" id="filters-count"></span>
+          </button>
+          <div id="result-count" class="result-count"></div>
+          <div id="focus-chip" class="focus-chip hidden"></div>
+          <button id="btn-random" class="btn small" data-t-title="Náhodný neviděný film z aktuálního výběru" title="Náhodný neviděný film z aktuálního výběru">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" /><circle cx="12" cy="12" r="1.2" fill="currentColor" /><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" /></svg>
+            <span data-t>Co dnes?</span>
+          </button>
+          <label class="sort">
+            <span data-t>Řadit</span>
+            <select id="sort">
+              <option value="title" data-t>podle názvu</option>
+              <option value="year" data-t>podle roku</option>
+              <option value="rating" data-t>podle hodnocení</option>
+              <option value="recent" data-t>naposledy přehrané</option>
+              <option value="added" data-t>nově přidané</option>
+              <option value="size" data-t>podle velikosti</option>
+              <option value="folder" data-t>podle složky</option>
+            </select>
+          </label>
+        </div>
+        <div id="grid" class="grid"></div>
+        <div id="show-page" class="show-page hidden"></div>
+      </main>
+
+      <aside id="drawer" class="drawer hidden">
+        <div id="drawer-content"></div>
+      </aside>
+    </div>
+
+    <div id="filters-backdrop" class="filters-backdrop"></div>
+    <div id="bulkbar" class="bulkbar hidden"></div>
+    <div id="modal-root"></div>
+    <div id="toasts"></div>
+    <div id="tooltip" class="tooltip hidden"></div>
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+      <div id="loading-text" data-t>Prohledávám složky…</div>
+    </div>
+
+    <script src="i18n.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>
