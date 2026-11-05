@@ -7,6 +7,8 @@ a seriálů ve VLC. Obě verze sdílejí stejný kód; liší se jen přehráva�
 > plays them in VLC and resumes where you left off. Posters, overviews and cast come from TMDB with
 > your own free API key. The app is available in Czech and English (switch in the top bar).
 
+![Moviary – úvodní obrazovka s řadami Pokračovat ve sledování, Nové díly seriálů a Chci vidět](docs/screenshots/home.png)
+
 ## Stažení
 
 Hotové soubory jsou v sekci [Releases](../../releases):
@@ -22,6 +24,25 @@ Exe není podepsané certifikátem, takže Windows při prvním spuštění zobr
 
 Pro plakáty a popisy si vytvořte bezplatný API klíč na
 [themoviedb.org](https://www.themoviedb.org/settings/api) a vložte ho v Nastavení.
+
+## Jak vypadá
+
+| | |
+|---|---|
+| ![Detail filmu](docs/screenshots/detail.png) | ![Herci, filmová série a technické údaje](docs/screenshots/detail-more.png) |
+| Detail filmu: pokračování od uložené pozice, Chci vidět, vlastní hodnocení a poznámka | Herci, filmová série, podobné tituly a technické údaje ze souboru |
+| ![Stránka seriálu](docs/screenshots/show.png) | ![Epizody seriálu](docs/screenshots/show-episodes.png) |
+| Stránka seriálu s datem dalšího dílu | Sezóny a epizody, chybějící díly podle TMDB |
+| ![Filtry podle kategorií](docs/screenshots/filters.png) | ![Statistiky](docs/screenshots/stats.png) |
+| Kategorie, stav, uložené filtry | Statistiky knihovny a sledování |
+
+<p>
+  <img src="docs/screenshots/mobile.png" alt="Android – úvodní obrazovka" width="260">
+  <img src="docs/screenshots/mobile-detail.png" alt="Android – detail filmu" width="260">
+</p>
+
+Na snímcích je vymyšlená ukázková knihovna (názvy, lidé i plakáty jsou smyšlené). Snímky vytvoří
+znovu `npm run screenshots`, viz [scripts/screenshots/take.js](scripts/screenshots/take.js).
 
 ## Funkce
 

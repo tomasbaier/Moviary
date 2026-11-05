@@ -696,6 +696,11 @@ body.compact { --top: calc(56px + env(safe-area-inset-top, 0px)); }
 .compact .mode-tabs button { flex: 1; justify-content: center; padding: 0 6px; min-width: 0; }
 .compact .topbar-actions { gap: 6px; }
 .compact #btn-add-library { width: 36px; padding: 0; font-size: 0; gap: 0; }
+/* Phones: About and the language are in Settings, so the tabs keep room for their labels. */
+@media (max-width: 520px) {
+  .compact #btn-about, .compact #btn-lang { display: none; }
+  .compact .mode-tabs .n, .compact .mode-tabs svg { display: none; }
+}
 .compact .job:empty { display: none; }
 .compact .job {
   position: fixed;

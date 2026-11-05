@@ -9,7 +9,8 @@
     "build": "node scripts/licenses.js && tauri build --no-bundle && node scripts/release.js exe",
     "android:dev": "tauri android dev",
     "android:build": "node scripts/licenses.js && node scripts/android-build.js",
-    "licenses": "node scripts/licenses.js"
+    "licenses": "node scripts/licenses.js",
+    "screenshots": "node scripts/screenshots/take.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

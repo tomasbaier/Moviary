@@ -1,5 +1,6 @@
 node_modules/
 src-tauri/target/
+src-tauri/target-screenshots/
 src-tauri/gen/schemas/
 dist/
 Release/
