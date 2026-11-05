@@ -67,7 +67,7 @@ impl Client {
             key: key.trim().to_string(),
             agent: ureq::AgentBuilder::new()
                 .timeout(Duration::from_secs(20))
-                .user_agent("Filmoteka/1.1")
+                .user_agent(concat!("Moviary/", env!("CARGO_PKG_VERSION")))
                 .build(),
         }
     }

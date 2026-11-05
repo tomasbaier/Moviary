@@ -1208,7 +1208,7 @@ mod tests {
 
     #[test]
     fn finds_external_subtitles() {
-        let dir = std::env::temp_dir().join(format!("filmoteka-subs-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moviary-subs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("Subs")).unwrap();
         for name in ["Film.2010.mkv", "Film.2010.cs.srt", "Film.2010.forced.en.srt", "Film.2010.CZE.ass", "Subs/Czech.srt"] {

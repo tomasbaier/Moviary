@@ -73,7 +73,7 @@ class FrameArgs {
 }
 
 /**
- * Android part of Filmotéka, called from Rust (src-tauri/src/mobile.rs):
+ * Android part of Moviary, called from Rust (src-tauri/src/mobile.rs):
  * VLC for Android, folder picker, access to all files and video thumbnails.
  *
  * Folders that are not readable as files (USB drives on most phones) are used through the

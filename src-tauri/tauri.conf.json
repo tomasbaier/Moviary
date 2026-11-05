@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Filmotéka",
+  "productName": "Moviary",
   "version": "1.5.0",
   "identifier": "cz.filmoteka.desktop",
   "build": {
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Filmotéka",
+        "title": "Moviary",
         "width": 1320,
         "height": 840,
         "minWidth": 860,

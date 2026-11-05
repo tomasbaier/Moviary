@@ -1,5 +1,5 @@
 [package]
-name = "filmoteka"
+name = "moviary"
 version = "1.5.0"
 description = "Kategorizace a přehrávání filmů pomocí VLC"
 license = "MIT"
@@ -10,7 +10,7 @@ name = "filmoteka_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "filmoteka"
+name = "moviary"
 path = "src/main.rs"
 
 [build-dependencies]

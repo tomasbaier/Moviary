@@ -15,6 +15,10 @@ use crate::db::{self, Db};
 const KIND: &str = "filmoteka-backup";
 const AUTO_PREFIX: &str = "auto-";
 const BEFORE_RESTORE_PREFIX: &str = "pred-obnovou-";
+/// Backup saved by the user ("Moviary-backup-2026-11-05.json").
+const MANUAL_PREFIX: &str = "Moviary-backup-";
+/// Manual backups, including those named by versions before the rename to Moviary.
+const MANUAL_PREFIXES: &[&str] = &[MANUAL_PREFIX, "Filmoteka-zaloha"];
 /// Automatic backups kept.
 const AUTO_KEEP: usize = 7;
 const DAY: u64 = 24 * 60 * 60;
@@ -59,7 +63,7 @@ pub fn read(path: &Path) -> Result<(Db, Option<u64>), String> {
 }
 
 fn parse(text: &str) -> Result<(Db, Option<u64>), String> {
-    let invalid = || tr!("Soubor není záloha Filmotéky.", "The file is not a Filmotéka backup.");
+    let invalid = || tr!("Soubor není záloha Moviary.", "The file is not a Moviary backup.");
     let value: Value = serde_json::from_str(text).map_err(|_| invalid())?;
     if value["kind"] == KIND {
         let created = value["created"].as_u64();
@@ -91,14 +95,14 @@ fn date_stamp(at: u64) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
-/// File name of a backup made now: "Filmoteka-zaloha-2026-11-04.json" and similar.
+/// File name of an automatic backup made now: "auto-2026-11-04-12345.json" and similar.
 pub fn file_name(prefix: &str) -> String {
     let now = db::now();
     format!("{prefix}{}-{:05}.json", date_stamp(now), now % DAY)
 }
 
 pub fn manual_file_name() -> String {
-    format!("Filmoteka-zaloha-{}.json", date_stamp(db::now()))
+    format!("{MANUAL_PREFIX}{}.json", date_stamp(db::now()))
 }
 
 /// Makes the daily automatic backup when the last one is older than a day; removes the
@@ -149,7 +153,7 @@ pub fn list_dir(dir: &Path) -> Vec<BackupInfo> {
                 "auto"
             } else if name.starts_with(BEFORE_RESTORE_PREFIX) {
                 "before-restore"
-            } else if name.starts_with("Filmoteka-zaloha") {
+            } else if MANUAL_PREFIXES.iter().any(|p| name.starts_with(p)) {
                 "manual"
             } else {
                 return None;
@@ -205,7 +209,7 @@ mod tests {
     fn round_trip_and_rejects_other_json() {
         let mut db = Db::default();
         db.categories.push("Komedie".into());
-        let dir = std::env::temp_dir().join(format!("filmoteka-backup-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("moviary-backup-{}", std::process::id()));
         let path = dir.join(manual_file_name());
         write(&db, &path).unwrap();
         let (restored, created) = read(&path).unwrap();

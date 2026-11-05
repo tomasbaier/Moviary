@@ -1,9 +1,9 @@
-# Filmotéka
+# Moviary
 
 Aplikace pro Windows a Android (Tauri 2 – Rust + webový frontend) pro kategorizaci a přehrávání filmů
 a seriálů ve VLC. Obě verze sdílejí stejný kód; liší se jen přehrávačem a výběrem složek.
 
-> **English:** Filmotéka organises the movies and series in your folders into your own categories,
+> **English:** Moviary organises the movies and series in your folders into your own categories,
 > plays them in VLC and resumes where you left off. Posters, overviews and cast come from TMDB with
 > your own free API key. The app is available in Czech and English (switch in the top bar).
 
@@ -11,11 +11,11 @@ a seriálů ve VLC. Obě verze sdílejí stejný kód; liší se jen přehráva�
 
 Hotové soubory jsou v sekci [Releases](../../releases):
 
-- `Filmoteka-<verze>-windows.exe` – jeden soubor, nic se neinstaluje. Potřebuje Windows 10/11
+- `Moviary-<verze>-windows.exe` – jeden soubor, nic se neinstaluje. Potřebuje Windows 10/11
   a [VLC](https://www.videolan.org/).
-- `Filmoteka-<verze>-android.apk` – Android 7+; potřebuje VLC pro Android z Google Play.
+- `Moviary-<verze>-android.apk` – Android 7+; potřebuje VLC pro Android z Google Play.
   Instalace mimo obchod je potřeba v telefonu povolit („Instalovat neznámé aplikace“).
-- `Filmoteka-<verze>-third-party-licenses.txt` – licence použitých knihoven.
+- `Moviary-<verze>-third-party-licenses.txt` – licence použitých knihoven.
 
 Exe není podepsané certifikátem, takže Windows při prvním spuštění zobrazí varování SmartScreen
 („Systém Windows ochránil váš počítač“). Spustíte ho přes **Další informace → Přesto spustit**.
@@ -92,7 +92,8 @@ Pro plakáty a popisy si vytvořte bezplatný API klíč na
   angličtina doplní na pozadí (potřeba TMDB klíč). Kategorie zůstávají, jak je máte. Texty jsou v kódu česky, anglické překlady ve slovníku [src/i18n.js](src/i18n.js)
   (`t('Český text')`, Rust: makro `tr!` v [src-tauri/src/i18n.rs](src-tauri/src/i18n.rs)).
 
-Data se ukládají do `%APPDATA%\cz.filmoteka.desktop\library.json`, plakáty a náhledy do
+Data se ukládají do `%APPDATA%\cz.filmoteka.desktop\library.json` (identifikátor pochází z původního
+názvu Filmotéka a zůstává kvůli kompatibilitě s daty starších verzí), plakáty a náhledy do
 podsložky `posters`, automatické zálohy do `backups`. Data starších verzí se při prvním spuštění
 automaticky převedou.
 
@@ -103,7 +104,7 @@ nebo USB disku), aplikace je prohledá, roztřídí a přehrává ve **VLC pro A
 
 - Při prvním přidání složky si aplikace řekne o „Přístup ke všem souborům“ (Android 11+) – videa
   jen čte, nic nemění. Složka se vybírá systémovým výběrem složek.
-- Film se otevře ve VLC pro Android (od uložené pozice, o 5 s dříve). Po zavření VLC si Filmotéka
+- Film se otevře ve VLC pro Android (od uložené pozice, o 5 s dříve). Po zavření VLC si Moviary
   převezme pozici, kde jste skončili; dokoukaný film se označí jako zhlédnutý. VLC musí mít také
   povolený přístup k souborům (zeptá se samo), titulky vedle videa najde automaticky.
 - Náhledy filmů bez plakátu vytváří systémový dekodér Androidu (MediaMetadataRetriever).
@@ -112,7 +113,7 @@ nebo USB disku), aplikace je prohledá, roztřídí a přehrává ve **VLC pro A
   stránku seriálu, výběr i dialogy.
 - Data jsou v soukromé složce aplikace (`/data/data/cz.filmoteka.app/`), nesdílejí se s Windows.
 - USB disky Android aplikacím většinou nezpřístupní jako soubory, jen přes systémové rozhraní
-  dokumentů (SAF). Takovou složku si Filmotéka uloží s trvalým oprávněním a prochází ji přes SAF;
+  dokumentů (SAF). Takovou složku si Moviary uloží s trvalým oprávněním a prochází ji přes SAF;
   VLC dostane `content://` adresu souboru (titulky vedle videa pak VLC samo nenajde). Složky
   v paměti telefonu a na SD kartě se čtou přímo jako soubory.
 - Síťová úložiště (SMB/NAS) nejsou podporovaná.
@@ -132,7 +133,7 @@ npm install
 npm run build
 ```
 
-Výsledek: `src-tauri/target/release/filmoteka.exe` (jeden samostatný soubor, frontend je uvnitř),
+Výsledek: `src-tauri/target/release/moviary.exe` (jeden samostatný soubor, frontend je uvnitř),
 zkopírovaný i do `Release`.
 
 Vývojový režim: `npm run dev`.
@@ -167,8 +168,8 @@ Při sestavení vytvoří [scripts/licenses.js](scripts/licenses.js) z `cargo me
 `src/third-party-licenses.txt` se seznamem a licencemi všech Rust knihoven Windows i Android
 verze (zobrazí se v aplikaci v okně O aplikaci a zkopíruje se i do `Release`). Ručně: `npm run licenses`.
 
-Výsledky buildů se kopírují do složky `Release` (`Filmoteka-<verze>-windows.exe`,
-`Filmoteka-<verze>-android.apk`). APK je podepsané vlastním klíčem
+Výsledky buildů se kopírují do složky `Release` (`Moviary-<verze>-windows.exe`,
+`Moviary-<verze>-android.apk`). APK je podepsané vlastním klíčem
 `src-tauri/gen/android/keystore/filmoteka-release.jks` (heslo v `keystore.properties`); obojí
 zálohujte a nesdílejte – bez stejného klíče nepůjde novou verzi nainstalovat přes starou.
 Na připojeném telefonu nebo emulátoru: `npm run android:dev`.
@@ -188,14 +189,14 @@ bez reklam a nekomerční.
 
 ## Soukromí
 
-Filmotéka nemá účty, reklamy ani telemetrii. Připojuje se jen k `api.themoviedb.org` a
+Moviary nemá účty, reklamy ani telemetrii. Připojuje se jen k `api.themoviedb.org` a
 `image.tmdb.org` (s vaším klíčem). Ostatní data – kategorie, pozice přehrávání, historie –
 zůstávají v datovém souboru v počítači nebo telefonu. VLC běží jako samostatný program; jeho
 ovládací rozhraní poslouchá jen na `127.0.0.1` s náhodným heslem.
 
 ## Licence
 
-Filmotéka je pod licencí [MIT](LICENSE). Použité knihovny mají vlastní licence (MIT, Apache-2.0,
+Moviary je pod licencí [MIT](LICENSE). Použité knihovny mají vlastní licence (MIT, Apache-2.0,
 MPL-2.0 a další), viz okno O aplikaci nebo `third-party-licenses.txt` u každého vydání.
-VLC je ochranná známka VideoLAN, logo TMDB je ochranná známka TMDB; Filmotéka s nimi nijak
+VLC je ochranná známka VideoLAN, logo TMDB je ochranná známka TMDB; Moviary s nimi nijak
 nesouvisí.

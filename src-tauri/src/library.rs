@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn keeps_data_for_moved_renamed_and_relocated_files() {
-        let tmp = std::env::temp_dir().join(format!("filmoteka-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("moviary-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         let root = tmp.join("disk-f");
         write(&root.join("A/Pelisky.mkv"), "pelisky content");

@@ -11,13 +11,13 @@ const releaseDir = path.join(root, 'Release');
 const apkDir = path.join(root, 'src-tauri/gen/android/app/build/outputs/apk/universal/release');
 const ARTIFACTS = {
   exe: {
-    from: [path.join(root, 'src-tauri/target/release/filmoteka.exe')],
-    to: `Filmoteka-${version}-windows.exe`,
+    from: [path.join(root, 'src-tauri/target/release/moviary.exe')],
+    to: `Moviary-${version}-windows.exe`,
   },
   apk: {
     // Signed when src-tauri/gen/android/keystore.properties exists, unsigned otherwise.
     from: [path.join(apkDir, 'app-universal-release.apk'), path.join(apkDir, 'app-universal-release-unsigned.apk')],
-    to: `Filmoteka-${version}-android.apk`,
+    to: `Moviary-${version}-android.apk`,
   },
 };
 
@@ -43,5 +43,5 @@ console.log(`Zkopírováno do ${path.relative(root, target)}`);
 // Licenses of the bundled libraries belong next to the downloads (scripts/licenses.js).
 const licenses = path.join(root, 'src', 'third-party-licenses.txt');
 if (fs.existsSync(licenses)) {
-  fs.copyFileSync(licenses, path.join(releaseDir, `Filmoteka-${version}-third-party-licenses.txt`));
+  fs.copyFileSync(licenses, path.join(releaseDir, `Moviary-${version}-third-party-licenses.txt`));
 }

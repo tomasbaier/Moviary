@@ -85,11 +85,11 @@ for (const id of used) {
 list.sort((a, b) => a.name.localeCompare(b.name));
 
 const line = '='.repeat(78);
-let out = `Filmotéka ${version} – third-party software
+let out = `Moviary ${version} – third-party software
 ${line}
 
-Filmotéka contains the open-source software listed below. Each component is
-used under its own license; the license texts follow the list. Filmotéka
+Moviary contains the open-source software listed below. Each component is
+used under its own license; the license texts follow the list. Moviary
 itself is MIT licensed (see below). Components under the MPL-2.0 are used
 unmodified; their source code is available from the repositories listed.
 
@@ -105,7 +105,7 @@ Not included, only used:
   app; they are part of the operating system.
 
 ${line}
-Filmotéka
+Moviary
 ${line}
 
 ${normalize(fs.readFileSync(path.join(root, 'LICENSE'), 'utf8'))}

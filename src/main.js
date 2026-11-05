@@ -585,7 +585,7 @@ function renderGrid() {
       : t('Zobrazeno <b>{n}</b> z {total}', { n: visible.length, total });
 
   if (!state.libraries.length) {
-    grid.innerHTML = emptyState(ICONS.film, t('Vítejte ve Filmotéce'),
+    grid.innerHTML = emptyState(ICONS.film, t('Vítejte v Moviary'),
       t('Přidejte složku, ve které máte uložené filmy nebo seriály. Aplikace v ní (včetně podsložek) najde všechny video soubory. Složek můžete přidat víc, třeba i z {where}.', {
         where: IS_ANDROID ? t('SD karty nebo USB disku') : t('externích disků'),
       }),
@@ -1161,12 +1161,12 @@ async function openSettings() {
           ${active ? '' : `<button class="btn small primary" data-act="install-vlc">${t('Nainstalovat z Google Play')}</button>`}
           <button class="btn small" data-act="refresh">${t('Zkontrolovat znovu')}</button>
         </div>
-        <div class="muted" style="margin-top:10px">${t('Po zavření VLC si Filmotéka uloží, kde jste skončili. VLC musí mít povolený přístup k souborům (zeptá se při prvním spuštění).')}</div>
+        <div class="muted" style="margin-top:10px">${t('Po zavření VLC si Moviary uloží, kde jste skončili. VLC musí mít povolený přístup k souborům (zeptá se při prvním spuštění).')}</div>
       </div>
 
       <div class="setting">
         <div class="title">${t('Přístup k souborům')}</div>
-        <div class="value ${storage ? 'ok' : 'bad'}">${storage ? `✓ ${t('Povoleno')}` : t('Není povoleno – Filmotéka nevidí video soubory.')}</div>
+        <div class="value ${storage ? 'ok' : 'bad'}">${storage ? `✓ ${t('Povoleno')}` : t('Není povoleno – Moviary nevidí video soubory.')}</div>
         ${storage ? '' : `<div class="row"><button class="btn small primary" data-act="grant-storage">${t('Povolit přístup ke všem souborům')}</button></div>`}
       </div>` : `
       <div class="setting">
@@ -1634,9 +1634,9 @@ async function onBackupClick(btn, draw) {
     let path = null;
     if (!IS_ANDROID) {
       path = await dialog.save({
-        title: t('Uložit zálohu Filmotéky'),
-        defaultPath: `Filmoteka-zaloha-${new Date().toISOString().slice(0, 10)}.json`,
-        filters: [{ name: t('Záloha Filmotéky'), extensions: ['json'] }],
+        title: t('Uložit zálohu Moviary'),
+        defaultPath: `Moviary-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [{ name: t('Záloha Moviary'), extensions: ['json'] }],
       });
       if (!path) return true;
     }
@@ -1647,10 +1647,10 @@ async function onBackupClick(btn, draw) {
     }
   } else if (act === 'import-backup') {
     const file = await dialog.open({
-      title: t('Vyberte zálohu Filmotéky'),
+      title: t('Vyberte zálohu Moviary'),
       multiple: false,
       directory: false,
-      filters: [{ name: t('Záloha Filmotéky'), extensions: ['json'] }],
+      filters: [{ name: t('Záloha Moviary'), extensions: ['json'] }],
     });
     if (file) await restoreBackup(file, null);
   } else if (act === 'restore') {
@@ -1744,7 +1744,7 @@ function statsHtml(history) {
     [fmtHours(totalLength), t('délka všech videí'), unknownLength
       ? t('bez {n} s neznámou délkou', { n: unknownLength })
       : t('≈ {n} dní v kuse', { n: Math.round(totalLength / 86400) })],
-    [fmtHours(watchedSeconds), t('nakoukáno ve Filmotéce'), t('tento měsíc {time}', { time: fmtHours(thisMonth) })],
+    [fmtHours(watchedSeconds), t('nakoukáno v Moviary'), t('tento měsíc {time}', { time: fmtHours(thisMonth) })],
     [fmtCount(inProgress), t('rozkoukaných videí'), t('{n} kdy přehraných', { n: files.filter((m) => m.lastPlayed).length })],
   ];
 
@@ -1838,7 +1838,7 @@ async function openAbout() {
     <div class="about-head">
       <svg viewBox="0 0 24 24" class="brand-icon" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="4" /><path d="M10 8.5v7l6-3.5z" fill="#fff" /></svg>
       <div>
-        <h2>${t('Filmotéka')}</h2>
+        <h2>${t('Moviary')}</h2>
         <div class="muted">${t('Verze {version}', { version: esc(s.version || '') })}</div>
       </div>
     </div>
@@ -1857,19 +1857,19 @@ async function openAbout() {
     <div class="setting">
       <div class="title">${t('Přehrávač')}</div>
       <div class="muted">${android
-        ? t('Videa přehrává VLC pro Android, které se instaluje zvlášť z Google Play. VLC je ochranná známka VideoLAN; Filmotéka s VideoLAN nijak nesouvisí.')
-        : t('Videa přehrává VLC media player, který se instaluje zvlášť. VLC je ochranná známka VideoLAN; Filmotéka s VideoLAN nijak nesouvisí.')}</div>
+        ? t('Videa přehrává VLC pro Android, které se instaluje zvlášť z Google Play. VLC je ochranná známka VideoLAN; Moviary s VideoLAN nijak nesouvisí.')
+        : t('Videa přehrává VLC media player, který se instaluje zvlášť. VLC je ochranná známka VideoLAN; Moviary s VideoLAN nijak nesouvisí.')}</div>
       <div class="row" style="margin-top:10px"><button class="btn small" data-link="videolan">videolan.org</button></div>
     </div>
 
     <div class="setting">
       <div class="title">${t('Soukromí')}</div>
-      <div class="muted">${t('Filmotéka nemá účty, reklamy ani sběr statistik. Do internetu se připojuje jen k TMDB (s vaším klíčem). Kategorie, pozice přehrávání a ostatní data zůstávají v tomto zařízení.')}</div>
+      <div class="muted">${t('Moviary nemá účty, reklamy ani sběr statistik. Do internetu se připojuje jen k TMDB (s vaším klíčem). Kategorie, pozice přehrávání a ostatní data zůstávají v tomto zařízení.')}</div>
     </div>
 
     <div class="setting">
       <div class="title">${t('Open source')}</div>
-      <div class="muted">${t('Filmotéka je svobodný software pod licencí MIT. Je postavená na frameworku Tauri a dalších open-source knihovnách; jejich licence najdete níže.')}</div>
+      <div class="muted">${t('Moviary je svobodný software pod licencí MIT. Je postavená na frameworku Tauri a dalších open-source knihovnách; jejich licence najdete níže.')}</div>
       <div class="row" style="margin-top:10px">
         <button class="btn small" data-act="licenses">${t('Licence a knihovny třetích stran')}</button>
         <button class="btn small" data-link="tauri">tauri.app</button>
@@ -1979,7 +1979,7 @@ async function openDuplicates() {
       </div>`;
   }).join('');
   const summary = html
-    ? `<p>${t('{groups}, {files}. Kdybyste v každé skupině ponechali jen největší soubor, uvolní se <b>{size}</b>. Filmotéka nic nemaže – soubory odstraňte sami{hint}.', {
+    ? `<p>${t('{groups}, {files}. Kdybyste v každé skupině ponechali jen největší soubor, uvolní se <b>{size}</b>. Moviary nic nemaže – soubory odstraňte sami{hint}.', {
       groups: `${groups.length} ${plural(groups.length, 'skupina', 'skupiny', 'skupin')}`,
       files: `${files} ${plural(files, 'soubor', 'soubory', 'souborů')}`,
       size: fmtBytes(reclaim),
@@ -2352,7 +2352,7 @@ async function ensureStorage() {
   if (!IS_ANDROID || (await call('storage_access', { request: false }))) return true;
   const ok = await modal({
     title: t('Povolit přístup k souborům?'),
-    text: t('Filmotéka potřebuje přístup ke všem souborům, aby mohla procházet složky s filmy a seriály (i na SD kartě nebo USB disku). Soubory jen čte, nic nemění. V následujícím okně zapněte „Povolit přístup ke správě všech souborů“ a vraťte se zpět.'),
+    text: t('Moviary potřebuje přístup ke všem souborům, aby mohla procházet složky s filmy a seriály (i na SD kartě nebo USB disku). Soubory jen čte, nic nemění. V následujícím okně zapněte „Povolit přístup ke správě všech souborů“ a vraťte se zpět.'),
     okLabel: t('Otevřít nastavení'),
   });
   if (!ok) return false;
@@ -2393,7 +2393,7 @@ async function removeLibrary(id) {
   if (!lib) return;
   const ok = await modal({
     title: t('Odebrat složku?'),
-    text: t('Složka „{path}“ bude odebrána z Filmotéky. Soubory na disku zůstanou beze změny a kategorie i pozice filmů zůstanou uložené – obnoví se, pokud složku přidáte znovu.', { path: lib.path }),
+    text: t('Složka „{path}“ bude odebrána z Moviary. Soubory na disku zůstanou beze změny a kategorie i pozice filmů zůstanou uložené – obnoví se, pokud složku přidáte znovu.', { path: lib.path }),
     okLabel: t('Odebrat'),
     danger: true,
   });
