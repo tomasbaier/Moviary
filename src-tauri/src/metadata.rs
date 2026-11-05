@@ -98,6 +98,7 @@ pub fn start(app: &AppHandle, ids: Option<Vec<u64>>, force: bool) -> Result<usiz
     let tasks = collect_tasks(app, &state, ids, force);
     if tasks.is_empty() {
         state.job.running.store(false, Ordering::SeqCst);
+        crate::segments::start_auto(app);
         return Ok(0);
     }
     state.job.cancel.store(false, Ordering::SeqCst);
@@ -327,6 +328,8 @@ fn run(app: AppHandle, tasks: Vec<Task>) {
     }
 
     state.job.running.store(false, Ordering::SeqCst);
+    // Series matched now can get their intro and credits times.
+    crate::segments::start_auto(&app);
     progress.running = false;
     let _ = app.emit("metadata-progress", progress);
 }

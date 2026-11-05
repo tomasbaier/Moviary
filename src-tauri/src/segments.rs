@@ -1,12 +1,18 @@
 //! Intro, recap and credits times of episodes from TheIntroDB (theintrodb.org), a community
-//! database looked up by the TMDB id of the series, and what a playback skips by them.
+//! database looked up by the TMDB id of the series, what a playback skips by them, and the
+//! background job that downloads them for the episodes of the library.
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::{self, Settings};
+use crate::library::{self, EpisodeLookup};
+use crate::AppState;
 
 const API: &str = "https://api.theintrodb.org/v4/media";
 /// Found times are asked again after this long, as the community corrects them.
@@ -18,6 +24,10 @@ const MISSING_MAX_AGE: u64 = 7 * 24 * 3600;
 pub const PACE: Duration = Duration::from_millis(400);
 /// Waiting for the times when an episode starts; the episode then plays without them.
 pub const PLAY_TIMEOUT: Duration = Duration::from_secs(4);
+/// Waiting for one answer in a batch.
+const BATCH_TIMEOUT: Duration = Duration::from_secs(15);
+/// The background job saves the data after this many episodes.
+const SAVE_EVERY: usize = 25;
 /// Shorter parts are not worth a jump.
 const MIN_SKIP: f64 = 3.0;
 
@@ -153,6 +163,174 @@ pub fn fetch(tmdb_id: u64, season: u32, episode: u32, length: f64, timeout: Dura
         Err(e) => return Err(tr!("Nelze se připojit k TheIntroDB: {e}", "Cannot connect to TheIntroDB: {e}")),
     };
     Ok(parse(&json))
+}
+
+/// Downloads run one at a time (the API allows few requests per second): the background job
+/// for the whole library, or the download of one series asked for on its page.
+#[derive(Default)]
+pub struct Job {
+    running: AtomicBool,
+    cancel: AtomicBool,
+}
+
+/// Holds [`Job::running`] while a download runs.
+struct Running<'a>(&'a Job);
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.running.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Job {
+    fn try_run(&self) -> Option<Running<'_>> {
+        (!self.running.swap(true, Ordering::SeqCst)).then(|| {
+            self.cancel.store(false, Ordering::SeqCst);
+            Running(self)
+        })
+    }
+
+    /// Stops the background job (if it runs) and takes its place.
+    fn take_over(&self) -> Option<Running<'_>> {
+        let deadline = Instant::now() + BATCH_TIMEOUT + Duration::from_secs(5);
+        loop {
+            self.cancel.store(true, Ordering::SeqCst);
+            if let Some(running) = self.try_run() {
+                return Some(running);
+            }
+            if Instant::now() > deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+/// Payload of the `segments-updated` event: the background job stored new times.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct Updated {
+    done: usize,
+    found: usize,
+}
+
+/// Starts the background download of the times of episodes that have none yet or old ones,
+/// when skipping is on and automatic download too. Runs after a scan and after the TMDB job
+/// (which may have matched a series). Unwatched episodes go first.
+pub fn start_auto(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let mut lookups: Vec<(bool, u64, EpisodeLookup)> = {
+        let db = state.db.lock().unwrap();
+        if !(db.settings.auto_segments && db.settings.uses_segments()) {
+            return;
+        }
+        db.records
+            .iter()
+            .filter(|(_, r)| r.segments.as_ref().is_none_or(Segments::stale))
+            .filter_map(|(id, r)| library::episode_lookup(&db, *id).map(|l| (r.watched, *id, l)))
+            .collect()
+    };
+    if lookups.is_empty() {
+        return;
+    }
+    lookups.sort_by_key(|(watched, id, l)| (*watched, l.tmdb_id, l.season, l.episode, *id));
+    let app = app.clone();
+    thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let Some(_running) = state.segments.try_run() else {
+            return;
+        };
+        let (mut done, mut found) = (0, 0);
+        for (_, id, lookup) in &lookups {
+            if state.segments.cancel.load(Ordering::SeqCst) {
+                break;
+            }
+            if done > 0 {
+                thread::sleep(PACE);
+            }
+            // A failure (no connection, the daily limit) ends the job; the next scan retries.
+            let Ok(times) = fetch(lookup.tmdb_id, lookup.season, lookup.episode, lookup.length, BATCH_TIMEOUT) else {
+                break;
+            };
+            found += usize::from(times.found());
+            done += 1;
+            let mut db = state.db.lock().unwrap();
+            if let Some(record) = db.records.get_mut(id) {
+                record.segments = Some(times);
+            }
+            if done % SAVE_EVERY == 0 {
+                let _ = db.save(&state.db_path);
+            }
+        }
+        if done > 0 {
+            let _ = state.db.lock().unwrap().save(&state.db_path);
+            let _ = app.emit("segments-updated", Updated { done, found });
+        }
+    });
+}
+
+/// Result of downloading the times of a series' episodes.
+pub struct ShowResult {
+    /// Episodes asked about and those TheIntroDB has times for.
+    pub total: usize,
+    pub found: usize,
+    /// Why the download stopped early.
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct Progress {
+    show_id: u64,
+    done: usize,
+    total: usize,
+}
+
+/// Downloads the times of all episodes of a series (asked for on its page), in place of the
+/// background job.
+pub fn fetch_show(app: &AppHandle, show_id: u64) -> Result<ShowResult, String> {
+    let state = app.state::<AppState>();
+    let lookups: Vec<(u64, EpisodeLookup)> = {
+        let db = state.db.lock().unwrap();
+        if db.shows.get(&show_id).and_then(|s| s.meta.as_ref()).is_none() {
+            return Err(tr!(
+                "Časy se hledají podle TMDB – seriál nejdřív přiřaďte v TMDB.",
+                "The times are looked up by TMDB – match the series on TMDB first."
+            ));
+        }
+        library::show_episodes(&db, show_id)
+            .into_iter()
+            .filter_map(|ep| library::episode_lookup(&db, ep).map(|l| (ep, l)))
+            .collect()
+    };
+    let _running = state.segments.take_over().ok_or_else(|| {
+        tr!("Časy se právě stahují, zkuste to za chvíli.", "The times are being downloaded, try again in a moment.")
+    })?;
+    let total = lookups.len();
+    let (mut found, mut error) = (0, None);
+    for (i, (ep, lookup)) in lookups.iter().enumerate() {
+        if i > 0 {
+            thread::sleep(PACE);
+        }
+        match fetch(lookup.tmdb_id, lookup.season, lookup.episode, lookup.length, BATCH_TIMEOUT) {
+            Ok(times) => {
+                found += usize::from(times.found());
+                if let Some(record) = state.db.lock().unwrap().records.get_mut(ep) {
+                    record.segments = Some(times);
+                }
+            }
+            Err(e) => {
+                error = Some(e);
+                break;
+            }
+        }
+        let _ = app.emit("segments-progress", Progress { show_id, done: i + 1, total });
+    }
+    state.db.lock().unwrap().save(&state.db_path)?;
+    match error {
+        Some(error) if found == 0 => Err(error),
+        error => Ok(ShowResult { total, found, error }),
+    }
 }
 
 fn parse(json: &Value) -> Segments {

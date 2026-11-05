@@ -71,8 +71,9 @@ znovu `npm run screenshots`, viz [scripts/screenshots/take.js](scripts/screensho
 - Přehrávání seriálů (v Nastavení, ve výchozím stavu vypnuté): další díl se pustí sám, když
   epizoda skončí; intro a rekapitulace se přeskočí a epizoda může skončit hned, jak začnou
   závěrečné titulky (scéna po titulcích zůstane). Časy pocházejí z komunitní databáze
-  [TheIntroDB](https://theintrodb.org/) podle TMDB ID seriálu a stahují se při spuštění epizody,
-  nebo pro celý seriál tlačítkem na jeho stránce. VLC se při tom ovládá přes stejné lokální HTTP
+  [TheIntroDB](https://theintrodb.org/) podle TMDB ID seriálu (bez API klíče). Stahují se
+  automaticky na pozadí po načtení složek (jako informace z TMDB, lze vypnout), při spuštění
+  epizody, nebo pro celý seriál tlačítkem na jeho stránce. VLC se při tom ovládá přes stejné lokální HTTP
   rozhraní; další díl se otevře v novém okně VLC (na celou obrazovku, pokud předchozí byl).
 - Technické údaje přímo z hlaviček souborů MKV/WebM a MP4/MOV (čte se jen pár set kB, ne celý
   soubor): kodek, rozlišení, HDR10/HLG/Dolby Vision, bitová hloubka, délka a zvukové a titulkové
@@ -244,7 +245,7 @@ vždy přesně sedět na vaši verzi souboru.
 Moviary nemá účty, reklamy ani telemetrii. Připojuje se jen k `api.themoviedb.org` a
 `image.tmdb.org` (s vaším klíčem), k `api.theintrodb.org` (TMDB ID seriálu, číslo sezóny a
 epizody a délka souboru; jen se zapnutým přeskakováním intra nebo titulků, nebo když časy
-stáhnete tlačítkem) a jednou denně k `api.github.com` kvůli kontrole nových verzí
+stáhnete tlačítkem; nejvýš 25 dotazů za 10 s) a jednou denně k `api.github.com` kvůli kontrole nových verzí
 (v Nastavení lze vypnout). Ostatní data – kategorie, pozice přehrávání, historie –
 zůstávají v datovém souboru v počítači nebo telefonu. VLC běží jako samostatný program; jeho
 ovládací rozhraní poslouchá jen na `127.0.0.1` s náhodným heslem.

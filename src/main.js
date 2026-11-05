@@ -1032,7 +1032,7 @@ function skipPanelHtml(s) {
   const enabled = set && (set.skipIntro || (set.skipCredits && !IS_ANDROID));
   let status;
   if (!s.tmdbId) status = t('Časy se hledají podle TMDB – nejdřív seriálu přiřaďte informace z TMDB.');
-  else if (!asked.length) status = t('Zatím nestaženo. Časy se stáhnou samy, když pustíte epizodu se zapnutým přeskakováním.');
+  else if (!asked.length) status = t('Zatím nestaženo. Se zapnutým přeskakováním se časy stáhnou samy.');
   else status = t('Časy intra nebo titulků zná TheIntroDB u {n} z {total} {noun}.', {
     n: found, total: s.episodes.length, noun: plural(s.episodes.length, 'epizody', 'epizod', 'epizod'),
   });
@@ -1519,6 +1519,8 @@ async function openSettings() {
             : t('VLC intro přeskočí samo. Když se do něj vrátíte, nechá ho běžet.')}</small></span></label>
         ${android ? '' : `<label class="check-row"><input type="checkbox" data-opt="skipCredits" ${s.skipCredits ? 'checked' : ''} />
           <span>${t('Přeskakovat závěrečné titulky')}<small>${t('Epizoda skončí, jakmile začnou titulky. Scéna po titulcích se nepřeskočí.')}</small></span></label>`}
+        <label class="check-row"><input type="checkbox" data-opt="autoSegments" ${s.autoSegments ? 'checked' : ''} />
+          <span>${t('Automaticky stahovat časy intra a titulků')}<small>${t('Po každém načtení složek, na pozadí, pro epizody, které je ještě nemají. Jen když je zapnuté přeskakování.')}</small></span></label>
         ${introDbNoticeHtml()}
       </div>
 
@@ -2188,7 +2190,7 @@ function tmdbNoticeHtml() {
 /** Credit for the intro and credits times (TheIntroDB asks for its name and a link). */
 function introDbNoticeHtml() {
   return `
-    <div class="muted" style="margin-top:10px">${t('Časy intra a titulků poskytuje TheIntroDB, komunitní databáze, do které je zadávají sami diváci, takže nemusí vždy sedět přesně. Stahují se podle TMDB ID seriálu, když pustíte epizodu (jen se zapnutým přeskakováním), nebo tlačítkem na stránce seriálu. Moviary s TheIntroDB nijak nesouvisí.')}</div>
+    <div class="muted" style="margin-top:10px">${t('Časy intra a titulků poskytuje TheIntroDB, komunitní databáze, do které je zadávají sami diváci, takže nemusí vždy sedět přesně. Stahují se podle TMDB ID seriálu (jen se zapnutým přeskakováním) po načtení složek, když pustíte epizodu, nebo tlačítkem na stránce seriálu. Moviary s TheIntroDB nijak nesouvisí.')}</div>
     <div class="row" style="margin-top:10px">
       <button class="btn small" type="button" data-link="theintrodb">theintrodb.org</button>
       <button class="btn small" type="button" data-link="theintrodb-terms">${t('Podmínky TheIntroDB')}</button>
@@ -2880,7 +2882,9 @@ async function rescan() {
 
 /** Runs the metadata job in the background after a scan when enabled. */
 function autoMetadata() {
+  // The metadata job downloads the intro and credits times after itself.
   if (state.settings?.autoMetadata) startMetadata(null, false);
+  else invoke('fetch_segments_auto').catch(() => {});
 }
 
 async function startMetadata(ids, force, announce = false) {
@@ -3495,6 +3499,10 @@ async function init() {
   await listen('autoplay-started', (e) => {
     updateMovie(e.payload);
     toast(t('Další díl: {code} · {title}', { code: epCode(e.payload), title: e.payload.title }));
+  });
+  await listen('segments-updated', async () => {
+    const data = await call('get_data');
+    if (data) applyData(data);
   });
   await listen('segments-progress', (e) => {
     const { showId, done, total } = e.payload;

@@ -59,6 +59,8 @@ pub struct AppState {
     /// Position (seconds) each running playback started from, for the history.
     pub sessions: Mutex<HashMap<u64, f64>>,
     pub job: metadata::Job,
+    /// Downloads of intro and credits times from TheIntroDB.
+    pub segments: segments::Job,
     pub watch: watch::Watch,
     pub update: update::Updater,
 }
@@ -84,6 +86,7 @@ struct SettingsView {
     skip_intro: bool,
     skip_credits: bool,
     autoplay_next: bool,
+    auto_segments: bool,
     tracks: tracks::TrackRules,
     /// Code and Czech name of the known languages.
     languages: Vec<(&'static str, &'static str)>,
@@ -111,6 +114,7 @@ fn settings_view(app: &AppHandle) -> SettingsView {
         skip_intro: db.settings.skip_intro,
         skip_credits: db.settings.skip_credits,
         autoplay_next: db.settings.autoplay_next,
+        auto_segments: db.settings.auto_segments,
         tracks: db.settings.tracks.clone(),
         languages: media::language_names(),
         backups_dir: state.backups_dir.to_string_lossy().to_string(),
@@ -620,62 +624,22 @@ struct SegmentsResult {
     data: AppData,
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct SegmentsProgress {
-    show_id: u64,
-    done: usize,
-    total: usize,
-}
-
 /// Downloads the intro and credits times of all episodes of a series from TheIntroDB.
 #[tauri::command]
 async fn fetch_show_segments(app: AppHandle, id: u64) -> Result<SegmentsResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let lookups: Vec<(u64, library::EpisodeLookup)> = {
-            let db = state.db.lock().unwrap();
-            if db.shows.get(&id).and_then(|s| s.meta.as_ref()).is_none() {
-                return Err(tr!(
-                    "Časy se hledají podle TMDB – seriál nejdřív přiřaďte v TMDB.",
-                    "The times are looked up by TMDB – match the series on TMDB first."
-                ));
-            }
-            library::show_episodes(&db, id)
-                .into_iter()
-                .filter_map(|ep| library::episode_lookup(&db, ep).map(|l| (ep, l)))
-                .collect()
-        };
-        let total = lookups.len();
-        let (mut found, mut error) = (0, None);
-        for (i, (ep, lookup)) in lookups.iter().enumerate() {
-            if i > 0 {
-                std::thread::sleep(segments::PACE);
-            }
-            match segments::fetch(lookup.tmdb_id, lookup.season, lookup.episode, lookup.length, std::time::Duration::from_secs(15)) {
-                Ok(times) => {
-                    found += usize::from(times.found());
-                    if let Some(record) = state.db.lock().unwrap().records.get_mut(ep) {
-                        record.segments = Some(times);
-                    }
-                }
-                Err(e) => {
-                    error = Some(e);
-                    break;
-                }
-            }
-            let _ = app.emit("segments-progress", SegmentsProgress { show_id: id, done: i + 1, total });
-        }
-        state.db.lock().unwrap().save(&state.db_path)?;
-        if found == 0 {
-            if let Some(error) = error {
-                return Err(error);
-            }
-        }
-        Ok(SegmentsResult { total, found, error, data: view::app_data(&state) })
+        let result = segments::fetch_show(&app, id)?;
+        let data = view::app_data(&app.state::<AppState>());
+        Ok(SegmentsResult { total: result.total, found: result.found, error: result.error, data })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Downloads in the background the times missing in the library (when enabled).
+#[tauri::command]
+fn fetch_segments_auto(app: AppHandle) {
+    segments::start_auto(&app);
 }
 
 // ---------- tracks ----------
@@ -1076,6 +1040,7 @@ async fn set_options(
     skip_intro: Option<bool>,
     skip_credits: Option<bool>,
     autoplay_next: Option<bool>,
+    auto_segments: Option<bool>,
 ) -> Result<SettingsView, String> {
     {
         let state = app.state::<AppState>();
@@ -1092,6 +1057,7 @@ async fn set_options(
             (skip_intro, &mut settings.skip_intro),
             (skip_credits, &mut settings.skip_credits),
             (autoplay_next, &mut settings.autoplay_next),
+            (auto_segments, &mut settings.auto_segments),
         ] {
             if let Some(value) = value {
                 *setting = value;
@@ -1100,6 +1066,8 @@ async fn set_options(
         db.save(&state.db_path)?;
     }
     watch::update(&app);
+    // Turning skipping on downloads the times of the library.
+    segments::start_auto(&app);
     Ok(settings_view(&app))
 }
 
@@ -1148,6 +1116,7 @@ pub fn run() {
                 playing: Mutex::new(HashSet::new()),
                 sessions: Mutex::new(HashMap::new()),
                 job: metadata::Job::default(),
+                segments: segments::Job::default(),
                 watch: watch::Watch::default(),
                 update: update::Updater::default(),
             });
@@ -1183,6 +1152,7 @@ pub fn run() {
             reset_progress,
             play_movie,
             fetch_show_segments,
+            fetch_segments_auto,
             reveal_in_explorer,
             fetch_metadata,
             cancel_metadata,

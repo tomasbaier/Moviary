@@ -191,6 +191,9 @@ pub struct Settings {
     pub skip_credits: bool,
     /// Start the next episode when one ends.
     pub autoplay_next: bool,
+    /// Download the times of new episodes from TheIntroDB in the background (when skipping
+    /// is on).
+    pub auto_segments: bool,
 }
 
 impl Settings {
@@ -217,6 +220,7 @@ impl Default for Settings {
             skip_intro: false,
             skip_credits: false,
             autoplay_next: false,
+            auto_segments: true,
         }
     }
 }
