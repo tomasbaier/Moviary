@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::media::MediaInfo;
-use crate::segments::Segments;
+use crate::segments::{ManualTimes, Segments};
 use crate::tracks::{TrackChoice, TrackRules};
 
 pub const VERSION: u32 = 2;
@@ -290,6 +290,9 @@ pub struct Record {
     /// Intro and credits times of an episode from TheIntroDB; None = not asked yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segments: Option<Segments>,
+    /// Intro and credits times the user set; they always win over TheIntroDB's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_times: Option<ManualTimes>,
 }
 
 /// Movie information from TMDB.

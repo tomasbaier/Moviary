@@ -101,6 +101,68 @@ impl Segments {
     }
 }
 
+/// Times the user set for an episode. Stored apart from TheIntroDB's, so a download never
+/// replaces them; for each part they win over TheIntroDB.
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ManualTimes {
+    /// Own intro (start, end) in seconds; replaces TheIntroDB's intro and recap.
+    pub intro: Option<(f64, f64)>,
+    /// Own start of the end credits; the episode ends there.
+    pub credits: Option<f64>,
+    /// Nothing to skip at the start, whatever TheIntroDB says.
+    pub no_intro: bool,
+    /// Nothing to skip at the end, whatever TheIntroDB says.
+    pub no_credits: bool,
+}
+
+impl ManualTimes {
+    pub fn is_empty(&self) -> bool {
+        *self == ManualTimes::default()
+    }
+
+    pub fn sets_intro(&self) -> bool {
+        self.no_intro || self.intro.is_some()
+    }
+
+    pub fn sets_credits(&self) -> bool {
+        self.no_credits || self.credits.is_some()
+    }
+
+    /// Checks the times entered by the user.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some((start, end)) = self.intro {
+            if !(start >= 0.0 && end > start) {
+                return Err(tr!("Konec intra musí být po jeho začátku.", "The end of the intro must come after its start."));
+            }
+        }
+        if self.credits.is_some_and(|c| c.is_nan() || c <= 0.0) {
+            return Err(tr!("Zadejte, kdy začínají titulky.", "Enter when the credits start."));
+        }
+        Ok(())
+    }
+}
+
+/// The times a playback uses: TheIntroDB's, with each part the user set replaced by theirs.
+/// None when there are none of either.
+pub fn effective(stored: Option<&Segments>, manual: Option<&ManualTimes>) -> Option<Segments> {
+    let Some(manual) = manual.filter(|m| !m.is_empty()) else {
+        return stored.cloned();
+    };
+    let mut times = stored.cloned().unwrap_or_default();
+    if manual.sets_intro() {
+        times.recap.clear();
+        times.intro = manual.intro.map(|(start, end)| Span { start, end: Some(end) }).into_iter().collect();
+    }
+    if manual.sets_credits() {
+        times.preview.clear();
+        times.credits = manual.credits.map(|start| Span { start, end: None }).into_iter().collect();
+        // Own times belong to this file: nothing to move to another release.
+        times.length = 0.0;
+    }
+    Some(times)
+}
+
 /// What the player does with the times during one playback.
 #[derive(Clone, Default, Debug)]
 pub struct Plan {
@@ -248,6 +310,8 @@ pub fn start_auto(app: &AppHandle) {
         db.records
             .iter()
             .filter(|(_, r)| r.segments.as_ref().is_none_or(Segments::stale))
+            // Own times for both parts need nothing from TheIntroDB.
+            .filter(|(_, r)| !r.manual_times.as_ref().is_some_and(|m| m.sets_intro() && m.sets_credits()))
             .filter_map(|(id, r)| library::episode_lookup(&db, *id).map(|l| (r.watched, *id, l)))
             .collect()
     };
@@ -456,6 +520,36 @@ mod tests {
         // Unknown release length: the times are used as they are.
         let plan = Plan::new(&settings(false, true), Some(&Segments { length: 0.0, ..segments }), 1660.0);
         assert_eq!(plan.credits, Some(1500.0));
+    }
+
+    #[test]
+    fn manual_times_win_over_theintrodb() {
+        let stored = Segments {
+            intro: vec![Span { start: 60.0, end: Some(90.0) }],
+            recap: vec![Span { start: 0.0, end: Some(40.0) }],
+            credits: vec![Span { start: 1500.0, end: None }],
+            length: 1560.0,
+            ..Segments::default()
+        };
+        // Own intro, TheIntroDB's credits (moved to the longer file).
+        let manual = ManualTimes { intro: Some((5.0, 35.0)), ..ManualTimes::default() };
+        let times = effective(Some(&stored), Some(&manual)).unwrap();
+        let plan = Plan::new(&settings(true, true), Some(&times), 1660.0);
+        assert_eq!(plan.skip, vec![(5.0, 35.0)]);
+        assert_eq!(plan.credits, Some(1600.0));
+
+        // Own credits are not moved; no intro at all.
+        let manual = ManualTimes { credits: Some(1550.0), no_intro: true, ..ManualTimes::default() };
+        let plan = Plan::new(&settings(true, true), effective(Some(&stored), Some(&manual)).as_ref(), 1660.0);
+        assert!(plan.skip.is_empty());
+        assert_eq!(plan.credits, Some(1550.0));
+
+        // Own times without anything from TheIntroDB; no credits.
+        let manual = ManualTimes { intro: Some((0.0, 30.0)), no_credits: true, ..ManualTimes::default() };
+        let plan = Plan::new(&settings(true, true), effective(None, Some(&manual)).as_ref(), 1660.0);
+        assert_eq!((plan.opening_end(), plan.credits), (30.0, None));
+        assert!(effective(None, Some(&ManualTimes::default())).is_none());
+        assert!(ManualTimes { intro: Some((30.0, 10.0)), ..ManualTimes::default() }.validate().is_err());
     }
 
     #[test]

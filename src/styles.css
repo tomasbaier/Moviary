@@ -637,6 +637,13 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .skip-chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .skip-chip svg { width: 10px; height: 10px; fill: currentColor; stroke: none; flex: none; }
 .skip-chip.off { color: var(--text-3); background: transparent; border-color: var(--line); }
+.skip-chip i { font-style: normal; font-size: 10px; opacity: 0.75; }
+.skip-times { cursor: pointer; }
+.skip-times:hover .skip-chip { filter: brightness(1.25); }
+.times-modal .time-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 10px 0 2px 25px; font-size: 13px; }
+.times-modal .time-fields[hidden] { display: none; }
+.times-modal .time-fields label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
+.times-modal .time-input { width: 86px; height: 32px; text-align: center; font-variant-numeric: tabular-nums; }
 .compact .skip-times { display: flex; margin: 4px 0 0; }
 .ep-overview {
   margin-top: 4px;

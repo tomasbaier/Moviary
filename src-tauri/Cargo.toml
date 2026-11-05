@@ -1,6 +1,6 @@
 [package]
 name = "moviary"
-version = "1.7.2"
+version = "1.7.3"
 description = "Kategorizace a přehrávání filmů pomocí VLC"
 license = "MIT"
 edition = "2021"

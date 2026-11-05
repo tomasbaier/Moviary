@@ -1120,23 +1120,122 @@ const hasSkipTimes = (e) => !!(e.skipTimes && (e.skipTimes.intro || e.skipTimes.
 /** Chips with the intro, recap and credits times of an episode (from TheIntroDB). */
 function skipTimesHtml(e) {
   if (!hasSkipTimes(e)) return '';
-  const { intro, recap, credits, afterCredits } = e.skipTimes;
+  const { intro, recap, credits, afterCredits, introManual, creditsManual } = e.skipTimes;
   const set = state.settings || {};
   const range = ([from, to]) => `${fmtTime(from)}–${fmtTime(to)}`;
-  const chip = (label, time, on, title) => `
-    <span class="skip-chip ${on ? '' : 'off'}" title="${esc(title)}">${SKIP_ICON}${label} <b>${time}</b></span>`;
-  const introTitle = set.skipIntro ? t('Přeskočí se (časy z TheIntroDB).') : t('Přeskakování intra je vypnuté v Nastavení (časy z TheIntroDB).');
+  const chip = (label, time, on, title, manual) => `
+    <span class="skip-chip ${on ? '' : 'off'} ${manual ? 'manual' : ''}" title="${esc(`${title} ${manual ? t('Vlastní čas.') : t('Čas z TheIntroDB.')} ${t('Kliknutím upravíte.')}`)}">${SKIP_ICON}${label} <b>${time}</b>${manual ? `<i>${t('vlastní')}</i>` : ''}</span>`;
+  const introTitle = set.skipIntro ? t('Přeskočí se.') : t('Přeskakování intra je vypnuté v Nastavení.');
   const creditsOn = set.skipCredits && !IS_ANDROID;
   const creditsTitle = !creditsOn
-    ? t('Přeskakování titulků je vypnuté v Nastavení (časy z TheIntroDB).')
-    : afterCredits
-      ? t('Přeskočí se, přehrávání pokračuje scénou po titulcích (časy z TheIntroDB).')
-      : t('Epizoda tu skončí (časy z TheIntroDB).');
-  return `<span class="skip-times">${[
-    recap ? chip(t('rekapitulace'), range(recap), set.skipIntro, introTitle) : '',
-    intro ? chip(t('intro'), range(intro), set.skipIntro, introTitle) : '',
-    credits ? chip(t('titulky'), afterCredits ? range([credits, afterCredits]) : t('od {time}', { time: fmtTime(credits) }), creditsOn, creditsTitle) : '',
+    ? t('Přeskakování titulků je vypnuté v Nastavení.')
+    : afterCredits ? t('Přeskočí se, přehrávání pokračuje scénou po titulcích.') : t('Epizoda tu skončí.');
+  return `<span class="skip-times" data-act="ep-times">${[
+    recap ? chip(t('rekapitulace'), range(recap), set.skipIntro, introTitle, introManual) : '',
+    intro ? chip(t('intro'), range(intro), set.skipIntro, introTitle, introManual) : '',
+    credits ? chip(t('titulky'), afterCredits ? range([credits, afterCredits]) : t('od {time}', { time: fmtTime(credits) }), creditsOn, creditsTitle, creditsManual) : '',
   ].join('')}</span>`;
+}
+
+const TIMER_ICON = '<svg viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 10v3.5l2.5 2M9.5 3h5"/></svg>';
+
+/** "1:23", "1:02:03" or "83" (seconds) -> seconds; NaN when it is not a time, null when empty. */
+function parseTime(text) {
+  const s = String(text ?? '').trim().replace(',', '.');
+  if (!s) return null;
+  if (!/^\d+(:\d{1,2}){0,2}(\.\d+)?$/.test(s)) return NaN;
+  const parts = s.split(':').map(Number);
+  if (parts.slice(1).some((p) => p >= 60)) return NaN;
+  return parts.reduce((total, p) => total * 60 + p, 0);
+}
+
+/** Own intro and credits times of an episode, over TheIntroDB's. */
+function openSkipTimesEditor(e) {
+  const db = e.introDbTimes;
+  const own = e.manualTimes || {};
+  const length = e.length || e.duration || 0;
+  const range = ([from, to]) => `${fmtTime(from)}–${fmtTime(to)}`;
+  const dbIntro = [db?.recap ? `${t('rekapitulace')} ${range(db.recap)}` : '', db?.intro ? `${t('intro')} ${range(db.intro)}` : ''].filter(Boolean).join(', ');
+  const dbCredits = db?.credits ? t('od {time}', { time: fmtTime(db.credits) }) : '';
+  const introMode = own.noIntro ? 'none' : own.intro ? 'own' : 'db';
+  const creditsMode = own.noCredits ? 'none' : own.credits != null ? 'own' : 'db';
+  const introValue = own.intro || db?.intro || db?.recap;
+  const creditsValue = own.credits ?? db?.credits;
+  const timeValue = (v) => (v == null ? '' : fmtTime(v));
+  const modes = (part, mode, dbText, noneText) => [
+    ['db', t('Podle TheIntroDB'), dbText || (db ? t('TheIntroDB pro tuto epizodu nic nemá.') : t('Zatím nestaženo.'))],
+    ['own', t('Vlastní čas'), ''],
+    ['none', t('Nepřeskakovat'), noneText],
+  ].map(([value, label, hint]) => `
+    <label class="radio-row"><input type="radio" name="${part}-mode" value="${value}" ${mode === value ? 'checked' : ''} />
+      <span>${label}${hint ? `<small>${esc(hint)}</small>` : ''}</span></label>`).join('');
+  const { el, close } = openModal(`
+    <h2>${t('Intro a titulky')}</h2>
+    <div class="muted">${epCode(e)} · ${esc(e.title)}${length ? ` · ${t('délka {time}', { time: fmtTime(length) })}` : ''}</div>
+    <div class="setting">
+      <div class="title">${t('Intro')}</div>
+      ${modes('intro', introMode, dbIntro, t('Ani když ho TheIntroDB zná.'))}
+      <div class="time-fields" data-for="intro" ${introMode === 'own' ? '' : 'hidden'}>
+        <label>${t('od')} <input class="time-input" name="intro-start" value="${timeValue(introValue?.[0])}" placeholder="0:00" spellcheck="false" /></label>
+        <label>${t('do')} <input class="time-input" name="intro-end" value="${timeValue(introValue?.[1])}" placeholder="1:30" spellcheck="false" /></label>
+      </div>
+    </div>
+    <div class="setting">
+      <div class="title">${t('Závěrečné titulky')}</div>
+      ${modes('credits', creditsMode, dbCredits, t('Ani když je TheIntroDB zná.'))}
+      <div class="time-fields" data-for="credits" ${creditsMode === 'own' ? '' : 'hidden'}>
+        <label>${t('od')} <input class="time-input" name="credits-start" value="${timeValue(creditsValue)}" placeholder="${length ? fmtTime(Math.max(0, length - 90)) : '42:00'}" spellcheck="false" /></label>
+        <span class="muted">${t('Epizoda v tento čas skončí.')}</span>
+      </div>
+      ${IS_ANDROID ? `<div class="muted" style="margin-top:8px">${t('Na Androidu se titulky nepřeskakují – VLC pro Android se během přehrávání nedá ovládat.')}</div>` : ''}
+    </div>
+    <div class="muted" style="margin-top:12px">${t('Čas zadejte jako 1:23 nebo 1:02:03. Vlastní časy mají vždy přednost a stažení z TheIntroDB je nikdy nepřepíše.')}</div>
+    <div class="modal-actions">
+      <button class="btn" data-act="cancel">${t('Zrušit')}</button>
+      <button class="btn primary" data-act="save">${t('Uložit')}</button>
+    </div>`, { extraClass: 'times-modal' });
+
+  el.addEventListener('change', (ev) => {
+    const m = ev.target.name?.match(/^(intro|credits)-mode$/);
+    if (!m) return;
+    const fields = el.querySelector(`.time-fields[data-for="${m[1]}"]`);
+    fields.hidden = ev.target.value !== 'own';
+    if (!fields.hidden) fields.querySelector('input').focus();
+  });
+  el.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && ev.target.matches('.time-input')) el.querySelector('[data-act="save"]').click();
+  });
+  el.addEventListener('click', async (ev) => {
+    const act = ev.target.closest('[data-act]')?.dataset.act;
+    if (act === 'cancel') return close();
+    if (act !== 'save') return;
+    const mode = (part) => el.querySelector(`[name="${part}-mode"]:checked`).value;
+    const value = (name) => parseTime(el.querySelector(`[name="${name}"]`).value);
+    const times = { intro: null, credits: null, noIntro: mode('intro') === 'none', noCredits: mode('credits') === 'none' };
+    const bad = (message, name) => {
+      toast(message, 'error');
+      el.querySelector(`[name="${name}"]`)?.focus();
+    };
+    if (mode('intro') === 'own') {
+      const [start, end] = [value('intro-start') ?? 0, value('intro-end')];
+      if (Number.isNaN(start)) return bad(t('Neplatný čas – zadejte ho jako 1:23.'), 'intro-start');
+      if (end == null || Number.isNaN(end)) return bad(t('Neplatný čas – zadejte ho jako 1:23.'), 'intro-end');
+      if (end <= start) return bad(t('Konec intra musí být po jeho začátku.'), 'intro-end');
+      if (length && end > length) return bad(t('Čas je za koncem epizody ({time}).', { time: fmtTime(length) }), 'intro-end');
+      times.intro = [start, end];
+    }
+    if (mode('credits') === 'own') {
+      const start = value('credits-start');
+      if (start == null || Number.isNaN(start) || start <= 0) return bad(t('Neplatný čas – zadejte ho jako 1:23.'), 'credits-start');
+      if (length && start >= length) return bad(t('Čas je za koncem epizody ({time}).', { time: fmtTime(length) }), 'credits-start');
+      times.credits = start;
+    }
+    const u = await call('set_manual_times', { id: e.id, times });
+    if (!u) return;
+    updateMovie(u);
+    close();
+    toast(t('Časy intra a titulků jsou uložené.'), 'ok');
+  });
 }
 
 function episodeRow(e) {
@@ -1163,6 +1262,7 @@ function episodeRow(e) {
         ${canPlay ? `<button class="ep-btn play" data-act="ep-play" title="${canResume(e) ? t('Pokračovat od {time}', { time: fmtTime(e.position) }) : t('Přehrát ve VLC')}">${ICONS.play}</button>` : ''}
         ${canPlay && canResume(e) ? `<button class="ep-btn" data-act="ep-restart" title="${t('Přehrát od začátku')}">${ICONS.restart}</button>` : ''}
         ${e.position > 0 ? `<button class="ep-btn" data-act="ep-reset" title="${t('Vynulovat pozici')}">${ICONS.close}</button>` : ''}
+        <button class="ep-btn ${e.manualTimes ? 'on' : ''}" data-act="ep-times" title="${t('Časy intra a titulků')}">${TIMER_ICON}</button>
         <button class="ep-btn ${e.watched ? 'on' : ''}" data-act="ep-watched" title="${e.watched ? t('Označit jako neviděné') : t('Označit jako zhlédnuté')}">${ICONS.check}</button>
         ${IS_ANDROID ? '' : `<button class="ep-btn" data-act="ep-reveal" title="${e.available ? t('Zobrazit v Průzkumníkovi') : t('Disk není připojený')}" ${e.available ? '' : 'disabled'}>${ICONS.folder}</button>`}
       </div>
@@ -3370,6 +3470,8 @@ function bindEvents() {
     } else if (act === 'ep-watched' && ep) {
       const u = await call('set_watched', { id: ep.id, watched: !ep.watched });
       if (u) updateMovie(u);
+    } else if (act === 'ep-times' && ep) {
+      openSkipTimesEditor(ep);
     } else if (act === 'ep-reveal' && ep) {
       call('reveal_in_explorer', { id: ep.id });
     } else if (act === 'match') {

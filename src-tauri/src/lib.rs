@@ -573,7 +573,10 @@ fn playback_plan(state: &AppState, id: u64, settings: &db::Settings) -> segments
             .is_some_and(|e| library::show_ids(&db).contains_key(&scanner::show_key(&e.show)));
         (library::episode_lookup(&db, id), record.segments.clone(), length, is_episode)
     };
-    let wanted = settings.uses_segments() && segments.as_ref().is_none_or(|s| s.stale());
+    let manual = state.db.lock().unwrap().records.get(&id).and_then(|r| r.manual_times.clone());
+    // Own times for both parts need nothing from TheIntroDB.
+    let own = manual.as_ref().is_some_and(|m| m.sets_intro() && m.sets_credits());
+    let wanted = settings.uses_segments() && !own && segments.as_ref().is_none_or(|s| s.stale());
     if let Some(ep) = lookup.filter(|_| wanted) {
         // Without an answer in a few seconds the episode plays with the stored times (if any).
         if let Ok(fetched) = segments::fetch(ep.tmdb_id, ep.season, ep.episode, ep.length, segments::PLAY_TIMEOUT) {
@@ -588,7 +591,7 @@ fn playback_plan(state: &AppState, id: u64, settings: &db::Settings) -> segments
     if !is_episode {
         return segments::Plan::default();
     }
-    segments::Plan::new(settings, segments.as_ref(), length)
+    segments::Plan::new(settings, segments::effective(segments.as_ref(), manual.as_ref()).as_ref(), length)
 }
 
 /// Starts the episode after `id` (it ended or its credits started); a failure is shown.
@@ -643,6 +646,16 @@ fn fetch_segments_auto(app: AppHandle) {
 }
 
 // ---------- tracks ----------
+
+/// Own intro and credits times of an episode; None (or nothing set) = TheIntroDB's again.
+#[tauri::command]
+fn set_manual_times(state: State<AppState>, id: u64, times: Option<segments::ManualTimes>) -> Result<Movie, String> {
+    let times = times.filter(|t| !t.is_empty());
+    if let Some(times) = &times {
+        times.validate()?;
+    }
+    update_record(&state, id, |r| r.manual_times = times)
+}
 
 #[tauri::command]
 fn set_movie_tracks(state: State<AppState>, id: u64, tracks: tracks::TrackChoice) -> Result<Movie, String> {
@@ -1153,6 +1166,7 @@ pub fn run() {
             play_movie,
             fetch_show_segments,
             fetch_segments_auto,
+            set_manual_times,
             reveal_in_explorer,
             fetch_metadata,
             cancel_metadata,

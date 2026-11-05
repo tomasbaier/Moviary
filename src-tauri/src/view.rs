@@ -9,7 +9,7 @@ use crate::db::{self, Db, Person, Record, SeasonMeta};
 use crate::library::{self, ScanState};
 use crate::media::{self, ExternalSubtitle, MediaInfo, Tags};
 use crate::scanner;
-use crate::segments::Segments;
+use crate::segments::{self as segs, ManualTimes, Segments};
 use crate::tracks::{self, AudioSelection, Resolved, Source, SubtitleSelection, TrackChoice};
 use crate::AppState;
 
@@ -75,8 +75,12 @@ pub struct Movie {
     wishlist: bool,
     my_rating: u8,
     note: String,
-    /// Times from TheIntroDB; None = not asked yet.
+    /// Times a playback uses (own ones over TheIntroDB's); None = none known.
     skip_times: Option<SkipTimes>,
+    /// TheIntroDB's times alone; None = not asked yet.
+    intro_db_times: Option<SkipTimes>,
+    /// Times the user set.
+    manual_times: Option<ManualTimes>,
 }
 
 /// Times TheIntroDB has for an episode, in seconds of this file.
@@ -90,6 +94,23 @@ pub struct SkipTimes {
     credits: Option<f64>,
     /// Where a scene after the credits starts.
     after_credits: Option<f64>,
+    /// The intro and the credits are the user's own times.
+    intro_manual: bool,
+    credits_manual: bool,
+}
+
+impl SkipTimes {
+    fn new(s: &Segments, length: f64, manual: Option<&ManualTimes>) -> SkipTimes {
+        let credits = s.end_credits(length);
+        SkipTimes {
+            intro: Segments::openers(&s.intro).next(),
+            recap: Segments::openers(&s.recap).next(),
+            credits: credits.map(|c| c.0),
+            after_credits: credits.map(|c| c.1).filter(|end| end.is_finite() && (length <= 0.0 || *end < length - 10.0)),
+            intro_manual: manual.is_some_and(ManualTimes::sets_intro),
+            credits_manual: manual.is_some_and(ManualTimes::sets_credits),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -329,15 +350,10 @@ fn movie(
         wishlist: rec.personal.wishlist,
         my_rating: rec.personal.rating,
         note: rec.personal.note.clone(),
-        skip_times: rec.segments.as_ref().map(|s| {
-            let credits = s.end_credits(length);
-            SkipTimes {
-                intro: Segments::openers(&s.intro).next(),
-                recap: Segments::openers(&s.recap).next(),
-                credits: credits.map(|c| c.0),
-                after_credits: credits.map(|c| c.1).filter(|end| end.is_finite() && (length <= 0.0 || *end < length - 10.0)),
-            }
-        }),
+        skip_times: segs::effective(rec.segments.as_ref(), rec.manual_times.as_ref())
+            .map(|s| SkipTimes::new(&s, length, rec.manual_times.as_ref())),
+        intro_db_times: rec.segments.as_ref().map(|s| SkipTimes::new(s, length, None)),
+        manual_times: rec.manual_times.clone(),
     };
 
     if let Some((show_id, ep)) = episode {
