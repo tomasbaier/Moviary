@@ -1139,10 +1139,12 @@ function skipTimesHtml(e) {
 
 const TIMER_ICON = '<svg viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 10v3.5l2.5 2M9.5 3h5"/></svg>';
 
-/** "1:23", "1:02:03" or "83" (seconds) -> seconds; NaN when it is not a time, null when empty. */
+/** "1:23", "1:02:03" or "83" (seconds) -> seconds; NaN when it is not a time, null when empty.
+ *  A trailing colon ("24:", left by the automatic colon) means whole minutes. */
 function parseTime(text) {
-  const s = String(text ?? '').trim().replace(',', '.');
+  let s = String(text ?? '').trim().replace(',', '.');
   if (!s) return null;
+  if (s.endsWith(':')) s += '00';
   if (!/^\d+(:\d{1,2}){0,2}(\.\d+)?$/.test(s)) return NaN;
   const parts = s.split(':').map(Number);
   if (parts.slice(1).some((p) => p >= 60)) return NaN;
@@ -1159,9 +1161,16 @@ function openSkipTimesEditor(e) {
   const dbCredits = db?.credits ? t('od {time}', { time: fmtTime(db.credits) }) : '';
   const introMode = own.noIntro ? 'none' : own.intro ? 'own' : 'db';
   const creditsMode = own.noCredits ? 'none' : own.credits != null ? 'own' : 'db';
-  const introValue = own.intro || db?.intro || db?.recap;
+  // The intro always runs from the start: only its end is set (TheIntroDB's end as a hint).
+  const introEnd = own.intro?.[1] ?? db?.intro?.[1] ?? db?.recap?.[1];
   const creditsValue = own.credits ?? db?.credits;
-  const timeValue = (v) => (v == null ? '' : fmtTime(v));
+  // Two digits per part, as the automatic colon writes them: "03:48", "01:02:03".
+  const timeValue = (v) => {
+    if (v == null) return '';
+    const s = Math.round(v);
+    const parts = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60];
+    return (parts[0] ? parts : parts.slice(1)).map((p) => String(p).padStart(2, '0')).join(':');
+  };
   const modes = (part, mode, dbText, noneText) => [
     ['db', t('Podle TheIntroDB'), dbText || (db ? t('TheIntroDB pro tuto epizodu nic nemá.') : t('Zatím nestaženo.'))],
     ['own', t('Vlastní čas'), ''],
@@ -1176,20 +1185,20 @@ function openSkipTimesEditor(e) {
       <div class="title">${t('Intro')}</div>
       ${modes('intro', introMode, dbIntro, t('Ani když ho TheIntroDB zná.'))}
       <div class="time-fields" data-for="intro" ${introMode === 'own' ? '' : 'hidden'}>
-        <label>${t('od')} <input class="time-input" name="intro-start" value="${timeValue(introValue?.[0])}" placeholder="0:00" spellcheck="false" /></label>
-        <label>${t('do')} <input class="time-input" name="intro-end" value="${timeValue(introValue?.[1])}" placeholder="1:30" spellcheck="false" /></label>
+        <label>${t('Intro končí v')} <input class="time-input" name="intro-end" value="${timeValue(introEnd)}" placeholder="01:30" inputmode="numeric" maxlength="8" spellcheck="false" autocomplete="off" /></label>
+        <span class="muted">${t('Počítá se vždy od začátku epizody, ta pak začne až v tomto čase.')}</span>
       </div>
     </div>
     <div class="setting">
       <div class="title">${t('Závěrečné titulky')}</div>
       ${modes('credits', creditsMode, dbCredits, t('Ani když je TheIntroDB zná.'))}
       <div class="time-fields" data-for="credits" ${creditsMode === 'own' ? '' : 'hidden'}>
-        <label>${t('od')} <input class="time-input" name="credits-start" value="${timeValue(creditsValue)}" placeholder="${length ? fmtTime(Math.max(0, length - 90)) : '42:00'}" spellcheck="false" /></label>
+        <label>${t('Titulky začínají v')} <input class="time-input" name="credits-start" value="${timeValue(creditsValue)}" placeholder="${length ? timeValue(Math.max(0, length - 90)) : '42:00'}" inputmode="numeric" maxlength="8" spellcheck="false" autocomplete="off" /></label>
         <span class="muted">${t('Epizoda v tento čas skončí.')}</span>
       </div>
       ${IS_ANDROID ? `<div class="muted" style="margin-top:8px">${t('Na Androidu se titulky nepřeskakují – VLC pro Android se během přehrávání nedá ovládat.')}</div>` : ''}
     </div>
-    <div class="muted" style="margin-top:12px">${t('Čas zadejte jako 1:23 nebo 1:02:03. Vlastní časy mají vždy přednost a stažení z TheIntroDB je nikdy nepřepíše.')}</div>
+    <div class="muted" style="margin-top:12px">${t('Pište jen číslice, dvojtečka se doplní sama: 2410 je 24:10. Vlastní časy mají vždy přednost a stažení z TheIntroDB je nikdy nepřepíše.')}</div>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">${t('Zrušit')}</button>
       <button class="btn primary" data-act="save">${t('Uložit')}</button>
@@ -1205,6 +1214,27 @@ function openSkipTimesEditor(e) {
   el.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && ev.target.matches('.time-input')) el.querySelector('[data-act="save"]').click();
   });
+  // Typing "24" adds the colon: "24:", then "24:10" (and "01:02:03" with hours).
+  el.addEventListener('input', (ev) => {
+    const input = ev.target;
+    if (!input.matches('.time-input')) return;
+    let v = input.value.replace(/[^\d:]/g, '').replace(/::+/g, ':');
+    const typedAtEnd = ev.inputType?.startsWith('insert') && input.selectionStart === input.value.length;
+    if (/^\d{3,6}$/.test(v)) {
+      // Pasted digits: by two from the left ("2410" -> "24:10").
+      v = v.match(/\d{1,2}/g).join(':');
+    } else if (typedAtEnd && ev.data !== ':') {
+      const colons = (v.match(/:/g) || []).length;
+      // A third digit in a part starts the next one: "24:105" -> "24:10:5" (hours).
+      v = colons < 2 ? v.replace(/(^|:)(\d{2})(\d)$/, '$1$2:$3') : v.replace(/(:\d{2})\d+$/, '$1');
+      // The colon after the minutes.
+      if (/^\d{2}$/.test(v)) v += ':';
+    }
+    if (v !== input.value) {
+      input.value = v;
+      input.setSelectionRange(v.length, v.length);
+    }
+  });
   el.addEventListener('click', async (ev) => {
     const act = ev.target.closest('[data-act]')?.dataset.act;
     if (act === 'cancel') return close();
@@ -1217,16 +1247,14 @@ function openSkipTimesEditor(e) {
       el.querySelector(`[name="${name}"]`)?.focus();
     };
     if (mode('intro') === 'own') {
-      const [start, end] = [value('intro-start') ?? 0, value('intro-end')];
-      if (Number.isNaN(start)) return bad(t('Neplatný čas – zadejte ho jako 1:23.'), 'intro-start');
-      if (end == null || Number.isNaN(end)) return bad(t('Neplatný čas – zadejte ho jako 1:23.'), 'intro-end');
-      if (end <= start) return bad(t('Konec intra musí být po jeho začátku.'), 'intro-end');
-      if (length && end > length) return bad(t('Čas je za koncem epizody ({time}).', { time: fmtTime(length) }), 'intro-end');
-      times.intro = [start, end];
+      const end = value('intro-end');
+      if (end == null || Number.isNaN(end) || end <= 0) return bad(t('Neplatný čas – zadejte ho jako 01:23.'), 'intro-end');
+      if (length && end >= length) return bad(t('Čas je za koncem epizody ({time}).', { time: fmtTime(length) }), 'intro-end');
+      times.intro = [0, end];
     }
     if (mode('credits') === 'own') {
       const start = value('credits-start');
-      if (start == null || Number.isNaN(start) || start <= 0) return bad(t('Neplatný čas – zadejte ho jako 1:23.'), 'credits-start');
+      if (start == null || Number.isNaN(start) || start <= 0) return bad(t('Neplatný čas – zadejte ho jako 01:23.'), 'credits-start');
       if (length && start >= length) return bad(t('Čas je za koncem epizody ({time}).', { time: fmtTime(length) }), 'credits-start');
       times.credits = start;
     }

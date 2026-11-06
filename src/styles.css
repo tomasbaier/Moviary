@@ -643,7 +643,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .times-modal .time-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 10px 0 2px 25px; font-size: 13px; }
 .times-modal .time-fields[hidden] { display: none; }
 .times-modal .time-fields label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
-.times-modal .time-input { width: 86px; height: 32px; text-align: center; font-variant-numeric: tabular-nums; }
+.times-modal .time-input { width: 96px; letter-spacing: 0.04em; height: 32px; text-align: center; font-variant-numeric: tabular-nums; }
 .compact .skip-times { display: flex; margin: 4px 0 0; }
 .ep-overview {
   margin-top: 4px;
