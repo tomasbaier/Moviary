@@ -1164,13 +1164,8 @@ function openSkipTimesEditor(e) {
   // The intro always runs from the start: only its end is set (TheIntroDB's end as a hint).
   const introEnd = own.intro?.[1] ?? db?.intro?.[1] ?? db?.recap?.[1];
   const creditsValue = own.credits ?? db?.credits;
-  // Two digits per part, as the automatic colon writes them: "03:48", "01:02:03".
-  const timeValue = (v) => {
-    if (v == null) return '';
-    const s = Math.round(v);
-    const parts = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60];
-    return (parts[0] ? parts : parts.slice(1)).map((p) => String(p).padStart(2, '0')).join(':');
-  };
+  // As the automatic colon writes them: "0:45", "3:48", "47:12", "1:02:03".
+  const timeValue = (v) => (v == null ? '' : fmtTime(Math.round(v)));
   const modes = (part, mode, dbText, noneText) => [
     ['db', t('Podle TheIntroDB'), dbText || (db ? t('TheIntroDB pro tuto epizodu nic nemá.') : t('Zatím nestaženo.'))],
     ['own', t('Vlastní čas'), ''],
@@ -1185,7 +1180,7 @@ function openSkipTimesEditor(e) {
       <div class="title">${t('Intro')}</div>
       ${modes('intro', introMode, dbIntro, t('Ani když ho TheIntroDB zná.'))}
       <div class="time-fields" data-for="intro" ${introMode === 'own' ? '' : 'hidden'}>
-        <label>${t('Intro končí v')} <input class="time-input" name="intro-end" value="${timeValue(introEnd)}" placeholder="01:30" inputmode="numeric" maxlength="8" spellcheck="false" autocomplete="off" /></label>
+        <label>${t('Intro končí v')} <input class="time-input" name="intro-end" value="${timeValue(introEnd)}" placeholder="0:45" inputmode="numeric" maxlength="8" spellcheck="false" autocomplete="off" /></label>
         <span class="muted">${t('Počítá se vždy od začátku epizody, ta pak začne až v tomto čase.')}</span>
       </div>
     </div>
@@ -1198,7 +1193,7 @@ function openSkipTimesEditor(e) {
       </div>
       ${IS_ANDROID ? `<div class="muted" style="margin-top:8px">${t('Na Androidu se titulky nepřeskakují – VLC pro Android se během přehrávání nedá ovládat.')}</div>` : ''}
     </div>
-    <div class="muted" style="margin-top:12px">${t('Pište jen číslice, dvojtečka se doplní sama: 2410 je 24:10. Vlastní časy mají vždy přednost a stažení z TheIntroDB je nikdy nepřepíše.')}</div>
+    <div class="muted" style="margin-top:12px">${t('Pište jen číslice, dvojtečka se doplní sama: 2410 je 24:10 a 045 je 0:45. Vlastní časy mají vždy přednost a stažení z TheIntroDB je nikdy nepřepíše.')}</div>
     <div class="modal-actions">
       <button class="btn" data-act="cancel">${t('Zrušit')}</button>
       <button class="btn primary" data-act="save">${t('Uložit')}</button>
@@ -1215,20 +1210,24 @@ function openSkipTimesEditor(e) {
     if (ev.key === 'Enter' && ev.target.matches('.time-input')) el.querySelector('[data-act="save"]').click();
   });
   // Typing "24" adds the colon: "24:", then "24:10" (and "01:02:03" with hours).
+  // A leading 0 is a whole part on its own: "0" -> "0:", then "0:45".
   el.addEventListener('input', (ev) => {
     const input = ev.target;
     if (!input.matches('.time-input')) return;
     let v = input.value.replace(/[^\d:]/g, '').replace(/::+/g, ':');
     const typedAtEnd = ev.inputType?.startsWith('insert') && input.selectionStart === input.value.length;
-    if (/^\d{3,6}$/.test(v)) {
+    if (/^0\d{2}$/.test(v)) {
+      // Pasted "045" -> "0:45".
+      v = `0:${v.slice(1)}`;
+    } else if (/^\d{3,6}$/.test(v)) {
       // Pasted digits: by two from the left ("2410" -> "24:10").
       v = v.match(/\d{1,2}/g).join(':');
     } else if (typedAtEnd && ev.data !== ':') {
       const colons = (v.match(/:/g) || []).length;
       // A third digit in a part starts the next one: "24:105" -> "24:10:5" (hours).
       v = colons < 2 ? v.replace(/(^|:)(\d{2})(\d)$/, '$1$2:$3') : v.replace(/(:\d{2})\d+$/, '$1');
-      // The colon after the minutes.
-      if (/^\d{2}$/.test(v)) v += ':';
+      // The colon after the minutes: "24" -> "24:", and "0" -> "0:" right away.
+      if (/^(\d{2}|0)$/.test(v)) v += ':';
     }
     if (v !== input.value) {
       input.value = v;

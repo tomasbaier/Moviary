@@ -526,7 +526,7 @@ const EN = {
   "Na Androidu se titulky nepřeskakují – VLC pro Android se během přehrávání nedá ovládat.": "Credits are not skipped on Android – VLC for Android cannot be controlled while it plays.",
   "Čas je za koncem epizody ({time}).": "The time is past the end of the episode ({time}).",
   "Časy intra a titulků jsou uložené.": "The intro and credits times are saved.",
-  "Pište jen číslice, dvojtečka se doplní sama: 2410 je 24:10. Vlastní časy mají vždy přednost a stažení z TheIntroDB je nikdy nepřepíše.": "Type digits only, the colon is added for you: 2410 is 24:10. Your own times always come first and a download from TheIntroDB never replaces them.",
+  "Pište jen číslice, dvojtečka se doplní sama: 2410 je 24:10 a 045 je 0:45. Vlastní časy mají vždy přednost a stažení z TheIntroDB je nikdy nepřepíše.": "Type digits only, the colon is added for you: 2410 is 24:10 and 045 is 0:45. Your own times always come first and a download from TheIntroDB never replaces them.",
   "Intro končí v": "The intro ends at",
   "Počítá se vždy od začátku epizody, ta pak začne až v tomto čase.": "It always counts from the start of the episode, which then begins at this time.",
   "Titulky začínají v": "The credits start at",
