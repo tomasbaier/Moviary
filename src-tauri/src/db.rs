@@ -37,6 +37,15 @@ pub struct Db {
     pub collections: BTreeMap<u64, Collection>,
     /// Filters saved by the user, in the order shown.
     pub saved_filters: Vec<SavedFilter>,
+    /// Version of the app that saved the data last; empty when 1.7.5 or older did.
+    pub saved_by: String,
+    /// Top-level fields of newer versions, kept as they are (see [`Db::to_json`]).
+    #[serde(skip)]
+    pub extra: serde_json::Map<String, Value>,
+    /// A newer version saved the data: this one only reads it and never saves (it would
+    /// lose what the newer one added).
+    #[serde(skip)]
+    pub newer_version: Option<String>,
 }
 
 /// A named combination of filters; `filter` is kept as the frontend sends it.
@@ -158,6 +167,9 @@ impl Default for Db {
             history: Vec::new(),
             collections: BTreeMap::new(),
             saved_filters: Vec::new(),
+            saved_by: String::new(),
+            extra: serde_json::Map::new(),
+            newer_version: None,
         }
     }
 }
@@ -194,6 +206,9 @@ pub struct Settings {
     /// Download the times of new episodes from TheIntroDB in the background (when skipping
     /// is on).
     pub auto_segments: bool,
+    /// Fields of newer versions, kept as they are so that this version does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
 }
 
 impl Settings {
@@ -221,6 +236,7 @@ impl Default for Settings {
             skip_credits: false,
             autoplay_next: false,
             auto_segments: true,
+            extra: serde_json::Map::new(),
         }
     }
 }
@@ -293,6 +309,9 @@ pub struct Record {
     /// Intro and credits times the user set; they always win over TheIntroDB's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_times: Option<ManualTimes>,
+    /// Fields of newer versions, kept as they are so that this version does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
 }
 
 /// Movie information from TMDB.
@@ -390,6 +409,9 @@ pub struct Show {
     pub status: Option<String>,
     /// Next episode announced on TMDB.
     pub next_episode: Option<NextEpisode>,
+    /// Fields of newer versions, kept as they are so that this version does not drop them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
 }
 
 impl Show {
@@ -430,7 +452,10 @@ impl Db {
             return Db::default();
         };
         match Db::from_json(serde_json::from_str::<Value>(&text)) {
-            Ok(db) => db,
+            Ok(mut db) => {
+                db.newer_version = newer_than_this(&db.saved_by).then(|| db.saved_by.clone());
+                db
+            }
             Err(_) => {
                 // Keep the unreadable file around instead of silently overwriting it.
                 let _ = fs::rename(path, path.with_extension(format!("corrupt-{}.json", now())));
@@ -444,7 +469,8 @@ impl Db {
         value
             .and_then(|value| {
                 if value.get("version").is_some() {
-                    serde_json::from_value::<Db>(value)
+                    let extra = unknown_fields(&value);
+                    serde_json::from_value::<Db>(value).map(|db| Db { extra, ..db })
                 } else {
                     serde_json::from_value::<LegacyDb>(value).map(migrate)
                 }
@@ -481,11 +507,35 @@ impl Db {
         }
     }
 
+    /// The data as it is saved: marked with this version and with the fields of newer versions.
+    pub fn to_json(&self) -> serde_json::Result<Value> {
+        let mut value = serde_json::to_value(self)?;
+        if let Value::Object(map) = &mut value {
+            for (key, field) in &self.extra {
+                map.entry(key.clone()).or_insert_with(|| field.clone());
+            }
+            map.insert("savedBy".into(), Value::String(env!("CARGO_PKG_VERSION").into()));
+        }
+        Ok(value)
+    }
+
+    /// Fails when a newer version saved the data (see [`Db::newer_version`]).
+    pub fn writable(&self) -> Result<(), String> {
+        match &self.newer_version {
+            None => Ok(()),
+            Some(version) => Err(tr!(
+                "Změny se neuloží: data už uložila novější verze Moviary ({version}). Tato verze je jen čte – spusťte novější.",
+                "Changes are not saved: a newer version of Moviary ({version}) already saved the data. This version only reads it – start the newer one."
+            )),
+        }
+    }
+
     pub fn save(&self, path: &Path) -> Result<(), String> {
+        self.writable()?;
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        let json = serde_json::to_string(self).map_err(|e| e.to_string())?;
+        let json = self.to_json().and_then(|v| serde_json::to_string(&v)).map_err(|e| e.to_string())?;
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, json).map_err(|e| tr!("Nelze uložit data: {e}", "Cannot save the data: {e}"))?;
         fs::rename(&tmp, path).map_err(|e| tr!("Nelze uložit data: {e}", "Cannot save the data: {e}"))
@@ -556,6 +606,27 @@ pub fn now() -> u64 {
 
 // ---------- format of version 1 (single folder, keyed by absolute path) ----------
 
+/// Top-level fields of `value` this version does not know.
+fn unknown_fields(value: &Value) -> serde_json::Map<String, Value> {
+    let known = serde_json::to_value(Db::default()).unwrap_or_default();
+    value
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(key, _)| known.get(key.as_str()).is_none())
+        .map(|(key, field)| (key.clone(), field.clone()))
+        .collect()
+}
+
+/// `version` (that saved the data) is newer than this app.
+fn newer_than_this(version: &str) -> bool {
+    use crate::update::parse_version;
+    matches!(
+        (parse_version(version), parse_version(env!("CARGO_PKG_VERSION"))),
+        (Some(saved), Some(this)) if saved > this
+    )
+}
+
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 struct LegacyDb {
@@ -615,6 +686,51 @@ fn migrate(old: LegacyDb) -> Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_fields_of_newer_versions() {
+        let newer = serde_json::json!({
+            "version": VERSION, "nextId": 3, "futureList": [1, 2],
+            "settings": { "skipIntro": true, "futureOption": "x" },
+            "records": { "1": { "relPath": "a.mkv", "futureTimes": { "a": 1 } } },
+            "shows": { "2": { "name": "Show", "futureRating": 5 } }
+        });
+        let db = Db::from_json(Ok(newer)).unwrap();
+        assert!(db.settings.skip_intro);
+        let saved = db.to_json().unwrap();
+        assert_eq!(saved["futureList"], serde_json::json!([1, 2]));
+        assert_eq!(saved["settings"]["futureOption"], "x");
+        assert_eq!(saved["records"]["1"]["futureTimes"]["a"], 1);
+        assert_eq!(saved["shows"]["2"]["futureRating"], 5);
+        assert_eq!(saved["savedBy"], env!("CARGO_PKG_VERSION"));
+        // Known fields this version removes stay removed.
+        let mut db = Db::from_json(Ok(serde_json::json!({
+            "version": VERSION, "records": { "1": { "manualTimes": { "credits": 100.0 } } }
+        })))
+        .unwrap();
+        db.records.get_mut(&1).unwrap().manual_times = None;
+        assert!(db.to_json().unwrap()["records"]["1"].get("manualTimes").is_none());
+    }
+
+    #[test]
+    fn data_of_a_newer_version_is_only_read() {
+        let dir = std::env::temp_dir().join(format!("moviary-newer-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("library.json");
+        let newer = r#"{"version":2,"savedBy":"99.0.0","settings":{"skipIntro":true}}"#;
+        fs::write(&path, newer).unwrap();
+        let db = Db::load(&path);
+        assert_eq!(db.newer_version.as_deref(), Some("99.0.0"));
+        assert!(db.settings.skip_intro);
+        assert!(db.save(&path).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), newer);
+        // Data of this or an older version is saved as usual.
+        fs::write(&path, r#"{"version":2,"savedBy":"1.0.0"}"#).unwrap();
+        let db = Db::load(&path);
+        assert!(db.newer_version.is_none());
+        db.save(&path).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn migrates_version_1() {

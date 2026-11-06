@@ -280,6 +280,8 @@ function itemPercent(m) {
 }
 
 function toast(message, kind = 'info') {
+  // The same message once at a time (e.g. "changes are not saved" from several actions).
+  if ([...$('#toasts').children].some((shown) => shown.textContent === message)) return;
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   el.textContent = message;
@@ -1166,6 +1168,9 @@ function openSkipTimesEditor(e) {
   const creditsValue = own.credits ?? db?.credits;
   // As the automatic colon writes them: "0:45", "3:48", "47:12", "1:02:03".
   const timeValue = (v) => (v == null ? '' : fmtTime(Math.round(v)));
+  // Takes the time where this episode is in VLC right now (VLC for Android cannot be asked).
+  const fromVlc = (name) => (IS_ANDROID ? '' : `
+    <button type="button" class="btn small" data-act="from-vlc" data-field="${name}" title="${t('Vezme čas, ve kterém je tato epizoda právě ve VLC.')}"><svg viewBox="0 0 24 24" aria-hidden="true" style="fill:currentColor;stroke:none"><path d="M8 5v14l11-7z"/></svg>${t('Čas z VLC')}</button>`);
   const modes = (part, mode, dbText, noneText) => [
     ['db', t('Podle TheIntroDB'), dbText || (db ? t('TheIntroDB pro tuto epizodu nic nemá.') : t('Zatím nestaženo.'))],
     ['own', t('Vlastní čas'), ''],
@@ -1180,7 +1185,7 @@ function openSkipTimesEditor(e) {
       <div class="title">${t('Intro')}</div>
       ${modes('intro', introMode, dbIntro, t('Ani když ho TheIntroDB zná.'))}
       <div class="time-fields" data-for="intro" ${introMode === 'own' ? '' : 'hidden'}>
-        <label>${t('Intro končí v')} <input class="time-input" name="intro-end" value="${timeValue(introEnd)}" placeholder="0:45" inputmode="numeric" maxlength="8" spellcheck="false" autocomplete="off" /></label>
+        <label>${t('Intro končí v')} <input class="time-input" name="intro-end" value="${timeValue(introEnd)}" placeholder="0:45" inputmode="numeric" maxlength="8" spellcheck="false" autocomplete="off" /></label>${fromVlc('intro-end')}
         <span class="muted">${t('Počítá se vždy od začátku epizody, ta pak začne až v tomto čase.')}</span>
       </div>
     </div>
@@ -1188,7 +1193,7 @@ function openSkipTimesEditor(e) {
       <div class="title">${t('Závěrečné titulky')}</div>
       ${modes('credits', creditsMode, dbCredits, t('Ani když je TheIntroDB zná.'))}
       <div class="time-fields" data-for="credits" ${creditsMode === 'own' ? '' : 'hidden'}>
-        <label>${t('Titulky začínají v')} <input class="time-input" name="credits-start" value="${timeValue(creditsValue)}" placeholder="${length ? timeValue(Math.max(0, length - 90)) : '42:00'}" inputmode="numeric" maxlength="8" spellcheck="false" autocomplete="off" /></label>
+        <label>${t('Titulky začínají v')} <input class="time-input" name="credits-start" value="${timeValue(creditsValue)}" placeholder="${length ? timeValue(Math.max(0, length - 90)) : '42:00'}" inputmode="numeric" maxlength="8" spellcheck="false" autocomplete="off" /></label>${fromVlc('credits-start')}
         <span class="muted">${t('Epizoda v tento čas skončí.')}</span>
       </div>
       ${IS_ANDROID ? `<div class="muted" style="margin-top:8px">${t('Na Androidu se titulky nepřeskakují – VLC pro Android se během přehrávání nedá ovládat.')}</div>` : ''}
@@ -1235,8 +1240,18 @@ function openSkipTimesEditor(e) {
     }
   });
   el.addEventListener('click', async (ev) => {
-    const act = ev.target.closest('[data-act]')?.dataset.act;
+    const btn = ev.target.closest('[data-act]');
+    const act = btn?.dataset.act;
     if (act === 'cancel') return close();
+    if (act === 'from-vlc') {
+      const time = await call('vlc_time', { id: e.id });
+      if (time === undefined) return;
+      if (time == null) return toast(t('Tato epizoda teď ve VLC nehraje. Pusťte ji, zastavte ve správném místě a klikněte znovu.'), 'error');
+      const input = el.querySelector(`[name="${btn.dataset.field}"]`);
+      input.value = timeValue(time);
+      input.focus();
+      return;
+    }
     if (act !== 'save') return;
     const mode = (part) => el.querySelector(`[name="${part}-mode"]:checked`).value;
     const value = (name) => parseTime(el.querySelector(`[name="${name}"]`).value);
@@ -3677,6 +3692,13 @@ async function init() {
   // Android stores it each start: its player plugin keeps it only while running.
   const lang = state.settings?.language || (/^(cs|sk)\b/i.test(navigator.language) ? 'cs' : 'en');
   await setLanguage(lang, !state.settings?.language || IS_ANDROID);
+  if (state.settings?.newerData) {
+    const { el, close } = openModal(`
+      <h2>${t('Starší verze Moviary')}</h2>
+      <p>${esc(t('Data naposledy uložila novější verze Moviary ({version}). Tato verze ({current}) je proto jen čte a nic v nich nezmění, aby nepřišla o to, co novější verze přidala. Zavřete ji a spusťte verzi {version} nebo novější.', { version: state.settings.newerData, current: state.settings.version }))}</p>
+      <div class="modal-actions"><button class="btn primary" data-act="ok">${t('Rozumím')}</button></div>`);
+    el.querySelector('[data-act="ok"]').addEventListener('click', close);
+  }
   const data = await call('get_data');
   if (data) applyData(data);
   if (state.libraries.length) {

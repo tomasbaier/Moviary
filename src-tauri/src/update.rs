@@ -97,7 +97,7 @@ fn agent(timeout: u64) -> ureq::Agent {
 }
 
 /// "v1.12.0" -> (1, 12, 0); pre-release suffixes ("-beta") are ignored.
-fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
     let core = text.trim().trim_start_matches(['v', 'V']).split(['-', '+']).next()?;
     let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
     Some((parts.next()??, parts.next().flatten().unwrap_or(0), parts.next().flatten().unwrap_or(0)))
@@ -132,7 +132,8 @@ pub fn check(app: &AppHandle, manual: bool) -> Result<Option<UpdateInfo>, String
     let skipped = {
         let mut db = state.db.lock().unwrap();
         db.settings.update_checked = db::now();
-        db.save(&state.db_path)?;
+        // Fails when a newer version saved the data – this one must still offer the update.
+        let _ = db.save(&state.db_path);
         db.settings.skipped_version.clone()
     };
     let current = app.package_info().version.to_string();
@@ -300,6 +301,35 @@ fn installable() -> bool {
     }
 }
 
+/// Argument of the new version started by an update, followed by the id of the old process:
+/// only one instance may run, so the new one waits until the old one has ended.
+#[cfg(desktop)]
+const WAIT_FOR: &str = "--wait-for";
+
+/// Started by an update: waits (20 s at most) until the previous version has ended.
+#[cfg(windows)]
+pub fn wait_for_previous() {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+    let args: Vec<String> = std::env::args().collect();
+    let Some(pid) = args
+        .iter()
+        .position(|a| a == WAIT_FOR)
+        .and_then(|i| args.get(i + 1))
+        .and_then(|pid| pid.parse::<u32>().ok())
+    else {
+        return;
+    };
+    // SAFETY: a handle of another process, only waited on and closed here.
+    unsafe {
+        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if !process.is_null() {
+            WaitForSingleObject(process, 20_000);
+            CloseHandle(process);
+        }
+    }
+}
+
 #[cfg(desktop)]
 fn swap_and_restart(app: &AppHandle, current: &Path, download: &Path) -> Result<(), String> {
     let old = old_path(current);
@@ -311,7 +341,11 @@ fn swap_and_restart(app: &AppHandle, current: &Path, download: &Path) -> Result<
         let _ = fs::remove_file(download);
         return Err(cannot(e));
     }
-    if let Err(e) = std::process::Command::new(current).spawn() {
+    let started = std::process::Command::new(current)
+        .arg(WAIT_FOR)
+        .arg(std::process::id().to_string())
+        .spawn();
+    if let Err(e) = started {
         // Back to the version that is running, so the next start works the same.
         let _ = fs::rename(current, download);
         let _ = fs::rename(&old, current);

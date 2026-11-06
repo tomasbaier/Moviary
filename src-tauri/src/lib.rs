@@ -20,7 +20,7 @@ mod vlc;
 mod watch;
 
 // The player: VLC on Windows, VLC for Android on Android. Both modules offer the same
-// functions (`detected`, `play`, `Thumbnailer`).
+// functions (`detected`, `play`, `current_time`, `Thumbnailer`).
 #[cfg(mobile)]
 use mobile as player;
 #[cfg(desktop)]
@@ -91,6 +91,8 @@ struct SettingsView {
     /// Code and Czech name of the known languages.
     languages: Vec<(&'static str, &'static str)>,
     backups_dir: String,
+    /// A newer version saved the data, so this one only reads it.
+    newer_data: Option<String>,
 }
 
 /// Blocks on Android (asks the plugin about VLC) – call only from async commands.
@@ -118,6 +120,7 @@ fn settings_view(app: &AppHandle) -> SettingsView {
         tracks: db.settings.tracks.clone(),
         languages: media::language_names(),
         backups_dir: state.backups_dir.to_string_lossy().to_string(),
+        newer_data: db.newer_version.clone(),
     }
 }
 
@@ -194,7 +197,10 @@ pub(crate) fn run_scan(app: &AppHandle) -> Result<(), String> {
         let mut db = state.db.lock().unwrap();
         let found = library::apply_fingerprints(&mut db, hashed);
         library::update_shows(&mut db);
-        db.save(&state.db_path)?;
+        // Data of a newer version is only read: the library can still be browsed.
+        if db.writable().is_ok() {
+            db.save(&state.db_path)?;
+        }
         found
     };
     let subtitles = library::external_subtitles(&found);
@@ -719,6 +725,12 @@ fn export_backup(state: State<AppState>, path: Option<String>) -> Result<String,
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Current playback time (seconds) of record `id` in VLC; None when VLC does not play it.
+#[tauri::command]
+async fn vlc_time(id: u64) -> Option<f64> {
+    player::current_time(id)
+}
+
 /// Replaces all data with a backup (the current data is backed up first) and scans again.
 #[tauri::command]
 async fn restore_backup(app: AppHandle, path: String) -> Result<AppData, String> {
@@ -734,6 +746,7 @@ async fn restore_backup(app: AppHandle, path: String) -> Result<AppData, String>
         }
         backup::reset_missing_images(&mut restored, &state.posters_dir);
         let mut db = state.db.lock().unwrap();
+        db.writable()?;
         backup::before_restore(&state.backups_dir, &db)?;
         *db = restored;
         db.save(&state.db_path)?;
@@ -1104,7 +1117,20 @@ fn poster_response(app: &AppHandle, uri_path: &str) -> Response<Vec<u8>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    #[cfg(windows)]
+    update::wait_for_previous();
+    let builder = tauri::Builder::default();
+    // One instance only (it must be the first plugin): a second start brings the running window
+    // to the front, so that two copies never overwrite each other's data.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
+    let builder = builder.plugin(tauri_plugin_dialog::init());
     #[cfg(mobile)]
     let builder = builder.plugin(mobile::init());
     builder
@@ -1167,6 +1193,7 @@ pub fn run() {
             fetch_show_segments,
             fetch_segments_auto,
             set_manual_times,
+            vlc_time,
             reveal_in_explorer,
             fetch_metadata,
             cancel_metadata,

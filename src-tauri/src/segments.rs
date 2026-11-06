@@ -304,7 +304,7 @@ pub fn start_auto(app: &AppHandle) {
     let state = app.state::<AppState>();
     let mut lookups: Vec<(bool, u64, EpisodeLookup)> = {
         let db = state.db.lock().unwrap();
-        if !(db.settings.auto_segments && db.settings.uses_segments()) {
+        if !(db.settings.auto_segments && db.settings.uses_segments()) || db.newer_version.is_some() {
             return;
         }
         db.records

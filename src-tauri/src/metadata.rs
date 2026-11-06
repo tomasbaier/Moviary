@@ -92,6 +92,8 @@ struct ShowFiles {
 /// `force` repeats lookups that were already done. Returns the number of queued items.
 pub fn start(app: &AppHandle, ids: Option<Vec<u64>>, force: bool) -> Result<usize, String> {
     let state = app.state::<AppState>();
+    // Nothing downloaded could be saved.
+    state.db.lock().unwrap().writable()?;
     if state.job.running.swap(true, Ordering::SeqCst) {
         return Err(tr!("Načítání informací už probíhá.", "Loading information is already running."));
     }

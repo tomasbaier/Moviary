@@ -6,12 +6,14 @@
 //! the episode at its credits and starts the next one, as the [`Plan`] says.
 
 use std::collections::hash_map::RandomState;
+use std::collections::BTreeMap;
 use std::fs;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -32,6 +34,22 @@ const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The end of a file is this close when VLC closes by itself (it is polled every second).
 const END_MARGIN: f64 = 5.0;
+
+/// HTTP interfaces of the running playbacks (record id -> port and authorization), so that
+/// the current time can be read (see [`current_time`]).
+static SESSIONS: Mutex<BTreeMap<u64, (u16, String)>> = Mutex::new(BTreeMap::new());
+
+/// Current time (seconds) of the playback of record `id`; None when VLC does not play it.
+pub fn current_time(id: u64) -> Option<f64> {
+    let (port, auth) = SESSIONS.lock().unwrap().get(&id).cloned()?;
+    let json = request(port, &auth, "")?;
+    if !matches!(json["state"].as_str(), Some("playing" | "paused")) {
+        return None;
+    }
+    // "time" is whole seconds; the position (0..1) is finer.
+    let (length, position) = (number(&json["length"]), number(&json["position"]));
+    Some(if length > 0.0 && position > 0.0 { position * length } else { number(&json["time"]) })
+}
 
 struct Status {
     time: f64,
@@ -179,6 +197,7 @@ fn monitor(app: AppHandle, mut child: Child, id: u64, port: u16, auth: String, p
     let mut previous: Option<f64> = None;
     let mut credits_done = false;
     let mut ended = false;
+    SESSIONS.lock().unwrap().insert(id, (port, auth.clone()));
 
     loop {
         thread::sleep(Duration::from_secs(1));
@@ -235,6 +254,7 @@ fn monitor(app: AppHandle, mut child: Child, id: u64, port: u16, auth: String, p
             dirty = false;
         }
     }
+    SESSIONS.lock().unwrap().remove(&id);
     // VLC closes by itself at the end of the file (--play-and-exit).
     let reached_end = ended || (length > 0.0 && last_time.is_some_and(|t| length - t <= END_MARGIN));
     playback::record(&app, id, last_time, length, true, ended);

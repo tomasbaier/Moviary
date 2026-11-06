@@ -531,4 +531,10 @@ const EN = {
   "Počítá se vždy od začátku epizody, ta pak začne až v tomto čase.": "It always counts from the start of the episode, which then begins at this time.",
   "Titulky začínají v": "The credits start at",
   "Neplatný čas – zadejte ho jako 01:23.": "Invalid time – enter it as 01:23.",
+  "Starší verze Moviary": "An older version of Moviary",
+  "Data naposledy uložila novější verze Moviary ({version}). Tato verze ({current}) je proto jen čte a nic v nich nezmění, aby nepřišla o to, co novější verze přidala. Zavřete ji a spusťte verzi {version} nebo novější.": "The data was last saved by a newer version of Moviary ({version}). This version ({current}) therefore only reads it and changes nothing, so that what the newer version added is not lost. Close it and start version {version} or newer.",
+  "Rozumím": "I understand",
+  "Vezme čas, ve kterém je tato epizoda právě ve VLC.": "Takes the time this episode is at in VLC right now.",
+  "Čas z VLC": "Time from VLC",
+  "Tato epizoda teď ve VLC nehraje. Pusťte ji, zastavte ve správném místě a klikněte znovu.": "This episode is not playing in VLC now. Play it, stop it at the right spot and click again.",
 };

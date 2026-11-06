@@ -41,7 +41,7 @@ fn wrap(db: &Db) -> Value {
         "kind": KIND,
         "appVersion": env!("CARGO_PKG_VERSION"),
         "created": db::now(),
-        "data": db,
+        "data": db.to_json().unwrap_or_default(),
     })
 }
 

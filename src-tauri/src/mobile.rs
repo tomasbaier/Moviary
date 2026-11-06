@@ -112,6 +112,11 @@ fn vlc_info(app: &AppHandle) -> Option<VlcInfo> {
     call::<VlcInfo>(app, "checkVlc", json!({})).ok()
 }
 
+/// VLC for Android cannot be asked while it plays.
+pub fn current_time(_id: u64) -> Option<f64> {
+    None
+}
+
 /// Player shown in the settings.
 pub fn detected(app: &AppHandle) -> Option<String> {
     vlc_info(app).filter(|v| v.installed).map(|v| match v.version {
