@@ -408,6 +408,7 @@ const EN = {
   "nově přidané": "recently added",
   "podle velikosti": "by size",
   "podle složky": "by folder",
+  "podle kategorie": "by category",
   "O aplikaci": "About",
   "Verze {version}": "Version {version}",
   "Kategorizace filmů a seriálů a jejich přehrávání ve VLC s pamatováním pozice.": "Organise movies and series into categories and play them in VLC, resuming where you left off.",

@@ -96,6 +96,8 @@ const SORTS = {
   added: (a, b) => b.added - a.added || byTitle(a, b),
   size: (a, b) => b.size - a.size || byTitle(a, b),
   folder: (a, b) => collator.compare(a.folder, b.folder) || byTitle(a, b),
+  // Grouped under a heading per category (see categoryGroups), by title within a group.
+  category: byTitle,
 };
 
 const ICONS = {
@@ -710,7 +712,11 @@ function renderGrid() {
   const page = !!openShow();
   grid.classList.toggle('hidden', page);
   $('.toolbar').classList.toggle('hidden', page);
-  visible = filtered();
+  const found = filtered();
+  const groups = state.sort === 'category' ? categoryGroups(found) : null;
+  // The cards in the order shown (a movie of several categories is there more times), so that
+  // a card's index and a Shift+click range follow what is on the screen.
+  visible = groups ? groups.flatMap((g) => g.items) : found;
   grid.classList.toggle('selecting', state.selection.size > 0);
 
   const shows = state.view === 'shows';
@@ -718,9 +724,9 @@ function renderGrid() {
   renderFocusChip();
   $('#result-count').innerHTML = !state.libraries.length
     ? ''
-    : visible.length === total
+    : found.length === total
       ? `<b>${total}</b> ${nounFor(total)}`
-      : t('Zobrazeno <b>{n}</b> z {total}', { n: visible.length, total });
+      : t('Zobrazeno <b>{n}</b> z {total}', { n: found.length, total });
 
   if (!state.libraries.length) {
     grid.innerHTML = emptyState(ICONS.film, t('Vítejte v Moviary'),
@@ -743,35 +749,63 @@ function renderGrid() {
       `<button class="btn" data-act="add-library">${ICONS.folder} ${t('Přidat další složku')}</button>`);
     return;
   }
-  if (!visible.length) {
+  if (!found.length) {
     grid.innerHTML = emptyState(ICONS.search, t('Nic nenalezeno'),
       shows ? t('Žádný seriál neodpovídá zvoleným filtrům.') : t('Žádný film neodpovídá zvoleným filtrům.'),
       `<button class="btn" data-act="clear-filters">${t('Zrušit filtry')}</button>`);
     return;
   }
 
-  grid.innerHTML = homeRowsHtml() + visible.map((m, i) => {
-    const pct = itemPercent(m);
-    const rating = m.rating ? `★ ${num(m.rating, 1)}` : null;
-    const mine = m.myRating ? `<span class="mine" title="${t('Moje hodnocení')}">♥ ${m.myRating}/5</span>` : null;
-    const meta = (m.isShow
-      ? [m.year, mine, rating, `${m.seasons.length} ${plural(m.seasons.length, 'sezóna', 'sezóny', 'sezón')}`, `${m.episodeCount} ${plural(m.episodeCount, 'epizoda', 'epizody', 'epizod')}`]
-      : [m.year, mine, rating, techBadge(m) ? `<span class="tech">${techBadge(m)}</span>` : null, fmtSize(m.size)]).filter(Boolean).join(' · ');
-    const progress = m.isShow
-      ? m.inProgress ? ` · <span class="accent">${m.watchedCount}/${m.episodeCount}</span>` : ''
-      : pct > 0 ? ` · <span class="accent">${Math.round(pct)} %</span>` : '';
-    const cats = [...m.categories].sort(collator.compare);
-    const classes = ['card', state.selection.has(m.id) ? 'selected' : '', m.available ? '' : 'offline'].join(' ');
-    return `
-      <div class="${classes}" data-i="${i}">
-        ${posterHtml(m, true)}
-        <div class="card-body">
-          <div class="card-title" title="${esc(m.isShow ? m.title : m.fileName)}">${esc(m.title)}</div>
-          <div class="card-meta">${meta}${progress}</div>
-          ${cats.length ? `<div class="chips">${cats.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}</div>` : ''}
-        </div>
-      </div>`;
-  }).join('');
+  if (groups) {
+    let i = 0;
+    grid.innerHTML = homeRowsHtml(false) + groups.map((g) => `
+      <div class="grid-head">${esc(g.title)} <span class="grid-head-count">${g.items.length}</span></div>
+      ${g.items.map((m) => cardHtml(m, i++)).join('')}`).join('');
+    return;
+  }
+  grid.innerHTML = homeRowsHtml() + visible.map(cardHtml).join('');
+}
+
+/** Items under a heading per category, by name, and those without one at the end. With
+ *  a category filter only the chosen categories get a heading. */
+function categoryGroups(items) {
+  const byCategory = new Map();
+  const none = [];
+  for (const m of items) {
+    if (!m.categories.length) none.push(m);
+    for (const c of m.categories) {
+      if (state.selectedCats.size && !state.selectedCats.has(c)) continue;
+      if (!byCategory.has(c)) byCategory.set(c, []);
+      byCategory.get(c).push(m);
+    }
+  }
+  const groups = [...byCategory.keys()].sort(collator.compare).map((c) => ({ title: c, items: byCategory.get(c) }));
+  if (none.length) groups.push({ title: t('Bez kategorie'), items: none });
+  return groups;
+}
+
+/** Card of a movie or show in the grid; `i` is its index in `visible`. */
+function cardHtml(m, i) {
+  const pct = itemPercent(m);
+  const rating = m.rating ? `★ ${num(m.rating, 1)}` : null;
+  const mine = m.myRating ? `<span class="mine" title="${t('Moje hodnocení')}">♥ ${m.myRating}/5</span>` : null;
+  const meta = (m.isShow
+    ? [m.year, mine, rating, `${m.seasons.length} ${plural(m.seasons.length, 'sezóna', 'sezóny', 'sezón')}`, `${m.episodeCount} ${plural(m.episodeCount, 'epizoda', 'epizody', 'epizod')}`]
+    : [m.year, mine, rating, techBadge(m) ? `<span class="tech">${techBadge(m)}</span>` : null, fmtSize(m.size)]).filter(Boolean).join(' · ');
+  const progress = m.isShow
+    ? m.inProgress ? ` · <span class="accent">${m.watchedCount}/${m.episodeCount}</span>` : ''
+    : pct > 0 ? ` · <span class="accent">${Math.round(pct)} %</span>` : '';
+  const cats = [...m.categories].sort(collator.compare);
+  const classes = ['card', state.selection.has(m.id) ? 'selected' : '', m.available ? '' : 'offline'].join(' ');
+  return `
+    <div class="${classes}" data-i="${i}">
+      ${posterHtml(m, true)}
+      <div class="card-body">
+        <div class="card-title" title="${esc(m.isShow ? m.title : m.fileName)}">${esc(m.title)}</div>
+        <div class="card-meta">${meta}${progress}</div>
+        ${cats.length ? `<div class="chips">${cats.map((c) => `<span class="chip">${esc(c)}</span>`).join('')}</div>` : ''}
+      </div>
+    </div>`;
 }
 
 /** TMDB status and actions of a movie or show. */
@@ -2695,7 +2729,8 @@ function favoriteCategories() {
 }
 
 /** Rows above the grid when nothing is filtered: continue watching, new, unwatched favourites. */
-function homeRowsHtml() {
+/** The rows above the grid; `withHead` adds the heading of the grid under them. */
+function homeRowsHtml(withHead = true) {
   if (!state.homeRows || hasFilters() || state.selection.size) return '';
   const rows = [];
   const continuing = [...movieItems.filter((m) => m.position > 0), ...showItems.filter((s) => s.inProgress && nextEpisode(s))]
@@ -2750,7 +2785,7 @@ function homeRowsHtml() {
     }
   }
   if (!rows.length) return '';
-  return `<div class="home-rows">${rows.join('')}</div><div class="grid-head">${t(VIEWS[state.view].all)}</div>`;
+  return `<div class="home-rows">${rows.join('')}</div>${withHead ? `<div class="grid-head">${t(VIEWS[state.view].all)}</div>` : ''}`;
 }
 
 /** Opens the detail of a movie or the page of a show, switching the tab when needed. */
@@ -2901,7 +2936,8 @@ function onLinkClick(e) {
 
 /** A random unwatched movie (or show) from the current selection. */
 function openRandomPick() {
-  const pool = visible.filter((m) => m.available && (m.isShow ? !m.watchedCount && !m.inProgress : !m.watched && m.position <= 0));
+  // Each one once, also when sorted by category.
+  const pool = [...new Set(visible)].filter((m) => m.available && (m.isShow ? !m.watchedCount && !m.inProgress : !m.watched && m.position <= 0));
   if (!pool.length) {
     toast(state.view === 'shows' ? t('Ve výběru není žádný neviděný seriál.') : t('Ve výběru není žádný neviděný film.'));
     return;

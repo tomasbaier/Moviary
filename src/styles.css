@@ -945,6 +945,8 @@ body.compact { --top: calc(56px + env(safe-area-inset-top, 0px)); }
 .home-rows { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 18px; }
 .home-row h3, .grid-head { margin: 0 0 10px; font-size: 15px; font-weight: 700; color: var(--text); text-transform: none; letter-spacing: 0; }
 .grid-head { grid-column: 1 / -1; margin: 6px 0 -6px; }
+.grid-head ~ .grid-head { margin-top: 18px; }
+.grid-head-count { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--text-3); }
 .row-scroll { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
 .row-card { flex: none; width: 132px; cursor: pointer; scroll-snap-align: start; }
 .row-card .poster { padding: 10px 9px 12px; }
