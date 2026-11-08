@@ -104,6 +104,8 @@ znovu `npm run screenshots`, viz [scripts/screenshots/take.js](scripts/screensho
 - Filmové série (kolekce TMDB): díly v pořadí s tím, co je v knihovně, co je zhlédnuté a co chybí,
   tlačítko „Pokračovat dalším dílem“ a filtr celé série.
 - Podobné ve vaší knihovně: doporučení TMDB omezená na tituly, které máte.
+- Mohlo by se vám líbit: doporučení TMDB, která v knihovně nemáte, s náhledem a odkazem na TMDB.
+  Načtou se při prvním otevření detailu a na 30 dní se uloží.
 - „Co dnes?“: náhodný neviděný film (seriál) z aktuálního výběru.
 - Hlídání složek: nové, přesunuté a smazané soubory se projeví samy (po několika sekundách klidu,
   takže kopírování velkého souboru vyvolá jedno prohledání), stejně jako připojení nebo odpojení
@@ -152,6 +154,9 @@ nebo USB disku), aplikace je prohledá, roztřídí a přehrává ve **VLC pro A
 - Náhledy filmů bez plakátu vytváří systémový dekodér Androidu (MediaMetadataRetriever).
 - VLC pro Android se během přehrávání nedá ovládat: další díl se pustí po skončení epizody, intro
   se přeskočí jen tehdy, když je hned na začátku, a titulky se nepřeskakují.
+- **Android TV:** aplikace je v nabídce televize a ovládá se dálkovým ovladačem (šipky, OK, Zpět).
+  Místo přístupu ke všem souborům si řekne o oprávnění ke čtení videí a složky (i na USB disku) se
+  vybírají přímo v aplikaci, protože televize systémový výběr obvykle nemají.
 - Na telefonu jsou filtry ve vysouvacím panelu (ikona trychtýře), detail filmu přes celou
   obrazovku, hromadný výběr dlouhým podržením karty; systémové tlačítko Zpět zavírá detail,
   stránku seriálu, výběr i dialogy.

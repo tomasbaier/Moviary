@@ -1027,3 +1027,33 @@ textarea.note:focus { border-color: var(--accent); }
 .next-air { margin-top: 8px; font-size: 13px; color: var(--text-2); }
 .next-air.out { color: var(--ok); }
 .next-air.ended { color: var(--text-3); }
+
+/* ---------- Android TV: controlled with a remote from a distance ---------- */
+/* TVs can cut off the edge of the picture. */
+body.tv { padding: 14px 24px; }
+.tv .drawer { top: 70px; right: 24px; bottom: 14px; }
+.tv .modal, .tv .modal.wide { max-height: calc(100% - 28px); overflow-y: auto; }
+.tv .card, .tv .row-card, .tv button, .tv input, .tv select { scroll-margin: 18px; }
+.tv :focus { outline: 3px solid #fff; outline-offset: 2px; }
+.tv .check-row:has(input:focus), .tv .radio-row:has(input:focus) { outline: 3px solid #fff; outline-offset: 3px; border-radius: 6px; }
+.tv .check-row input:focus, .tv .radio-row input:focus { outline: none; }
+.tv .card:focus, .tv .row-card:focus { outline: none; }
+.tv .card:focus .poster, .tv .row-card:focus .poster { outline: 4px solid #fff; outline-offset: 2px; transform: scale(1.04); }
+.tv .card:focus .card-title, .tv .row-card:focus .row-title { color: #fff; }
+.tv .filter .cat-actions { display: none; }
+.tv .filter .count { display: inline; }
+
+.tv-picker { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: rgba(5, 6, 10, 0.7); }
+.tv-picker-box { display: flex; flex-direction: column; gap: 6px; width: min(420px, 80vw); max-height: 86vh; padding: 14px; overflow-y: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; }
+.tv-picker-box .btn { flex: none; justify-content: flex-start; }
+
+.folder-modal .folder-path { word-break: break-all; }
+.folder-modal .folder-list { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; margin-top: 12px; padding: 4px; overflow-y: auto; }
+.folder-modal .folder-list .btn { flex: none; justify-content: flex-start; }
+
+.suggestions:empty { display: none; }
+.show-page > .suggestions, .show-page .suggestions { margin-top: 18px; }
+.suggestion-preview { display: flex; gap: 18px; align-items: flex-start; }
+.suggestion-preview .poster { flex: none; width: 130px; }
+.suggestion-preview h2 { margin: 0 0 4px; }
+.suggestion-preview p { margin: 12px 0 0; max-height: 34vh; overflow-y: auto; }

@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::db::{self, NextEpisode, Collection, CollectionPart, CollectionRef, EpisodeMeta, Meta, Person, SeasonMeta, META_VERSION};
+use crate::db::{self, NextEpisode, Collection, CollectionPart, CollectionRef, EpisodeMeta, Meta, Person, SeasonMeta, Suggestion, META_VERSION};
 
 const API: &str = "https://api.themoviedb.org/3";
 const IMAGES: &str = "https://image.tmdb.org/t/p";
@@ -22,6 +22,8 @@ const EXTRAS: &str = "credits,recommendations,similar";
 const CAST_LIMIT: usize = 15;
 /// Recommended and similar titles kept.
 const SIMILAR_LIMIT: usize = 40;
+/// Suggestions kept per title; the ones in the library are left out when they are shown.
+const SUGGESTION_LIMIT: usize = 30;
 
 pub enum Error {
     /// Invalid key – no point in continuing.
@@ -134,6 +136,14 @@ impl Client {
             candidates = self.search(title, None, tv)?;
         }
         Ok(best_match(&candidates, title, year).map(|c| c.id))
+    }
+
+    /// Titles TMDB recommends for a movie or series, in the language of the app.
+    pub fn suggestions(&self, id: u64, tv: bool) -> Result<Vec<Suggestion>, Error> {
+        let path = format!("/{}/{id}", if tv { "tv" } else { "movie" });
+        let language = if crate::i18n::english() { ENGLISH } else { LANGUAGE };
+        let v = self.get(&path, &[("language", language), ("append_to_response", "recommendations,similar")])?;
+        Ok(suggestions(&v))
     }
 
     /// Full details in Czech and English; the poster is downloaded into `posters_dir`.
@@ -423,6 +433,28 @@ fn similar(v: &Value) -> Vec<u64> {
     ids
 }
 
+/// Recommended, then similar titles of a details response.
+fn suggestions(v: &Value) -> Vec<Suggestion> {
+    let mut found: Vec<Suggestion> = Vec::new();
+    for list in ["recommendations", "similar"] {
+        for item in v[list]["results"].as_array().into_iter().flatten() {
+            let c = candidate(item);
+            let usable = c.id > 0 && !c.title.is_empty() && item["adult"] != true;
+            if usable && found.len() < SUGGESTION_LIMIT && found.iter().all(|s| s.tmdb_id != c.id) {
+                found.push(Suggestion {
+                    tmdb_id: c.id,
+                    title: c.title,
+                    year: c.year,
+                    rating: item["vote_average"].as_f64().unwrap_or(0.0),
+                    overview: c.overview,
+                    poster_url: item["poster_path"].as_str().map(|p| format!("{IMAGES}/w185{p}")),
+                });
+            }
+        }
+    }
+    found
+}
+
 fn or_english(czech: String, english: &str) -> String {
     if czech.is_empty() {
         english.to_string()
@@ -551,6 +583,28 @@ pub fn best_match<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suggestions_merge_both_lists_for_movies_and_series() {
+        let v = serde_json::json!({
+            "recommendations": { "results": [
+                { "id": 1, "title": "Film", "release_date": "2010-05-01", "vote_average": 7.5, "overview": "Popis", "poster_path": "/a.jpg" },
+                { "id": 2, "name": "Seriál", "first_air_date": "2019-01-01" },
+                { "id": 3, "title": "Pro dospělé", "adult": true },
+                { "id": 4, "title": "" }
+            ] },
+            "similar": { "results": [ { "id": 1, "title": "Film" }, { "id": 5, "title": "Další" } ] }
+        });
+        let found = suggestions(&v);
+        assert_eq!(found.iter().map(|s| s.tmdb_id).collect::<Vec<_>>(), [1, 2, 5]);
+        assert_eq!(found[0].title, "Film");
+        assert_eq!(found[0].year, Some(2010));
+        assert_eq!(found[0].rating, 7.5);
+        assert_eq!(found[0].poster_url.as_deref(), Some("https://image.tmdb.org/t/p/w185/a.jpg"));
+        assert_eq!(found[1].title, "Seriál");
+        assert_eq!(found[1].year, Some(2019));
+        assert_eq!(found[1].poster_url, None);
+    }
 
     fn c(id: u64, title: &str, original: &str, year: u32) -> Candidate {
         Candidate {

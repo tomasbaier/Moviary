@@ -35,6 +35,17 @@ const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 /// The end of a file is this close when VLC closes by itself (it is polled every second).
 const END_MARGIN: f64 = 5.0;
 
+/// Only Android runs on a TV.
+pub fn is_tv(_app: &AppHandle) -> bool {
+    false
+}
+
+pub fn show_keyboard(_app: &AppHandle) {}
+
+pub fn storage_roots(_app: &AppHandle) -> Result<Vec<crate::library::Folder>, String> {
+    Ok(Vec::new())
+}
+
 /// HTTP interfaces of the running playbacks (record id -> port and authorization), so that
 /// the current time can be read (see [`current_time`]).
 static SESSIONS: Mutex<BTreeMap<u64, (u16, String)>> = Mutex::new(BTreeMap::new());

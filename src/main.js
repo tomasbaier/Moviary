@@ -9,6 +9,8 @@ const $ = (sel) => document.querySelector(sel);
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 // Phone-sized window: filters in a slide-in panel, detail over the whole screen.
 const compactQuery = window.matchMedia('(max-width: 760px)');
+/** Android TV: controlled with a remote (see tv.js). */
+let IS_TV = false;
 
 const PREFS_KEY = 'filmoteka.prefs';
 
@@ -1032,6 +1034,7 @@ function renderShowPage() {
         ${s.cast?.length ? `<div><h3>${t('Hrají')}</h3>${castHtml(s.cast)}</div>` : ''}
         ${similarItems(s).length ? `<div><h3>${t('Podobné ve vaší knihovně')}</h3>${similarHtml(s)}</div>` : ''}
       </div>` : ''}
+      ${suggestionsSlot(s)}
 
       <div class="season-tabs">
         ${s.seasons.map((x) => {
@@ -1427,6 +1430,8 @@ function renderDetail() {
     ${m.collection ? `<h3>${t('Filmová série')}</h3>${collectionHtml(m)}` : ''}
 
     ${similarItems(m).length ? `<h3>${t('Podobné ve vaší knihovně')}</h3>${similarHtml(m)}` : ''}
+
+    ${suggestionsSlot(m)}
 
     <h3>${t('Technické údaje')}</h3>
     ${techInfoHtml(m)}
@@ -2665,6 +2670,7 @@ async function openDuplicates() {
 /** Switches texts, number and date formats and sorting; `save` stores the choice (and tells the backend). */
 async function setLanguage(lang, save = true) {
   LANG = lang === 'en' ? 'en' : 'cs';
+  suggestions.clear();
   collator = new Intl.Collator(LANG, { sensitivity: 'base', numeric: true });
   $('#lang-code').textContent = LANG.toUpperCase();
   translatePage();
@@ -2803,6 +2809,10 @@ function openItem(m) {
 function onRowCardClick(e) {
   const card = e.target.closest('.row-card');
   if (!card) return false;
+  if (card.dataset.suggestion) {
+    openSuggestion(card.closest('[data-suggestions]').dataset.suggestions, +card.dataset.suggestion);
+    return true;
+  }
   const id = +card.dataset.id;
   const m = card.dataset.kind === 'show' ? showById(id) : movieById(id);
   if (!m) return true;
@@ -2873,6 +2883,77 @@ function similarItems(m) {
 function similarHtml(m) {
   const items = similarItems(m);
   return items.length ? `<div class="row-scroll">${items.map((x) => rowCardHtml(x)).join('')}</div>` : '';
+}
+
+// ---------- suggestions: titles TMDB recommends that are not in the library ----------
+
+/** Downloaded suggestions by "movie:id" / "show:id"; an empty list while loading or on failure. */
+const suggestions = new Map();
+const SUGGESTIONS_SHOWN = 12;
+
+async function fetchSuggestions(id, tv) {
+  try {
+    return await invoke('get_suggestions', { id, tv });
+  } catch {
+    return [];
+  }
+}
+
+function suggestionsBody(key) {
+  const pool = key.startsWith('show:') ? showItems : movieItems;
+  const owned = new Set(pool.map((x) => x.tmdbId));
+  const items = (suggestions.get(key) || []).filter((s) => !owned.has(s.tmdbId)).slice(0, SUGGESTIONS_SHOWN);
+  if (!items.length) return '';
+  return `<h3>${t('Mohlo by se vám líbit')}</h3><div class="row-scroll">${items.map((s) => `
+    <div class="row-card" data-suggestion="${s.tmdbId}" title="${esc(s.title)}">
+      <div class="poster ${s.posterUrl ? 'tmdb' : ''}" style="--h:${hue(s.title)}">
+        ${s.posterUrl ? `<img class="poster-img" src="${esc(s.posterUrl)}" loading="lazy" alt="" draggable="false" />` : ''}
+        <div class="poster-title">${esc(s.title)}</div>
+      </div>
+      <div class="rc-title">${esc(s.title)}</div>
+      <div class="rc-sub">${[s.year, s.rating ? `★ ${num(s.rating, 1)}` : null].filter(Boolean).join(' · ') || '&nbsp;'}</div>
+    </div>`).join('')}</div>`;
+}
+
+/** Place for the suggestions of `m`; they are downloaded the first time it is shown. */
+function suggestionsSlot(m) {
+  if (!m.tmdbId || !state.settings?.tmdbKey) return '';
+  const key = `${m.isShow ? 'show' : 'movie'}:${m.id}`;
+  if (!suggestions.has(key)) {
+    suggestions.set(key, []);
+    fetchSuggestions(m.id, !!m.isShow).then((list) => {
+      suggestions.set(key, list);
+      document.querySelectorAll(`[data-suggestions="${key}"]`).forEach((slot) => {
+        slot.innerHTML = suggestionsBody(key);
+      });
+    });
+  }
+  return `<div class="suggestions" data-suggestions="${key}">${suggestionsBody(key)}</div>`;
+}
+
+function openSuggestion(key, tmdbId) {
+  const s = suggestions.get(key)?.find((x) => x.tmdbId === tmdbId);
+  if (!s) return;
+  const tv = key.startsWith('show:');
+  const facts = [tv ? t('Seriál') : t('Film'), s.year, s.rating ? `★ ${num(s.rating, 1)}` : null].filter(Boolean).join(' · ');
+  const { el, close } = openModal(`
+    <div class="suggestion-preview">
+      <div class="poster ${s.posterUrl ? 'tmdb' : ''}" style="--h:${hue(s.title)}">
+        ${s.posterUrl ? `<img class="poster-img" src="${esc(s.posterUrl)}" alt="" draggable="false" />` : ''}
+        <div class="poster-title">${esc(s.title)}</div>
+      </div>
+      <div>
+        <h2>${esc(s.title)}</h2>
+        <div class="muted">${facts}</div>
+        <p>${esc(s.overview || t('Popis není k dispozici.'))}</p>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" data-act="tmdb">${t('Zobrazit na TMDB')}</button>
+      <button class="btn primary" data-act="close">${t('Zavřít')}</button>
+    </div>`);
+  el.querySelector('[data-act="close"]').addEventListener('click', close);
+  el.querySelector('[data-act="tmdb"]').addEventListener('click', () => call('open_tmdb', { tmdbId: s.tmdbId, tv }));
 }
 
 /** Parts of the movie series `m` belongs to, with what the library has and what was watched. */
@@ -3002,6 +3083,7 @@ function openRandomPick() {
  * named by `label`.
  */
 async function pickFolder(title, defaultPath) {
+  if (IS_TV) return pickFolderOnTv(title);
   if (IS_ANDROID) {
     // Without "access to all files" the folder is still usable through the document provider.
     await ensureStorage();
@@ -3011,9 +3093,71 @@ async function pickFolder(title, defaultPath) {
   return path ? { path, label: null } : null;
 }
 
+/** Android TV usually has no system folder picker usable with a remote: folders are browsed here. */
+async function pickFolderOnTv(title) {
+  await ensureStorage();
+  const roots = (await call('storage_roots')) || [];
+  return new Promise((resolve) => {
+    let result = null;
+    let path = null;
+    let entries = roots;
+    const parents = [];
+    const { el, close } = openModal(`
+      <h2>${esc(title)}</h2>
+      <div class="muted folder-path"></div>
+      <div class="folder-list"></div>
+      <div class="modal-actions">
+        <button class="btn" data-act="system">${t('Výběr systému')}</button>
+        <button class="btn" data-act="cancel">${t('Zrušit')}</button>
+        <button class="btn primary" data-act="choose">${t('Vybrat tuto složku')}</button>
+      </div>`, { extraClass: 'folder-modal', onClose: () => resolve(result) });
+    const draw = () => {
+      el.querySelector('.folder-path').textContent = path ?? t('Úložiště');
+      el.querySelector('[data-act="choose"]').disabled = path === null;
+      const up = path === null ? '' : `<button class="btn" data-act="up">${ICONS.back} ${t('Nadřazená složka')}</button>`;
+      el.querySelector('.folder-list').innerHTML = up + (entries.length
+        ? entries.map((f, i) => `<button class="btn" data-act="open" data-i="${i}">${ICONS.folder} ${esc(f.name)}</button>`).join('')
+        : `<div class="muted">${path === null ? t('Nebylo nalezeno žádné úložiště.') : t('Žádné podsložky')}</div>`);
+      (el.querySelector('.folder-list [data-act="open"]') || el.querySelector('.folder-list [data-act="up"]'))?.focus();
+    };
+    const go = async (target, list) => {
+      const found = list || (await call('list_folders', { path: target }));
+      if (!found) return false;
+      path = target;
+      entries = found;
+      draw();
+      return true;
+    };
+    el.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-act]');
+      const act = btn?.dataset.act;
+      if (act === 'cancel') close();
+      else if (act === 'choose') {
+        result = { path, label: null };
+        close();
+      } else if (act === 'system') {
+        const picked = await call('pick_folder');
+        if (picked) {
+          result = picked;
+          close();
+        }
+      } else if (act === 'open') {
+        const current = path;
+        if (await go(entries[+btn.dataset.i].path)) parents.push(current);
+      } else if (act === 'up') {
+        const parent = parents.pop();
+        await go(parent ?? null, parent ? undefined : roots);
+      }
+    });
+    draw();
+  });
+}
+
 /** Android: the app needs "access to all files" to read the videos. Asks for it when missing. */
 async function ensureStorage() {
   if (!IS_ANDROID || (await call('storage_access', { request: false }))) return true;
+  // A TV asks with the usual permission dialog, which explains itself.
+  if (IS_TV) return !!(await call('storage_access', { request: true }));
   const ok = await modal({
     title: t('Povolit přístup k souborům?'),
     text: t('Moviary potřebuje přístup ke všem souborům, aby mohla procházet složky s filmy a seriály (i na SD kartě nebo USB disku). Soubory jen čte, nic nemění. V následujícím okně zapněte „Povolit přístup ke správě všech souborů“ a vraťte se zpět.'),
@@ -3260,7 +3404,7 @@ function setFiltersOpen(open) {
 
 /** Moves the search field to the toolbar on small screens. */
 function applyLayout() {
-  const compact = compactQuery.matches;
+  const compact = !IS_TV && compactQuery.matches;
   document.body.classList.toggle('compact', compact);
   const search = $('.search');
   if (compact) $('.toolbar').prepend(search);
@@ -3276,7 +3420,7 @@ let ignorePop = false;
 let syncPending = false;
 
 const layerOpen = () =>
-  !!closeCurrentModal || state.filtersOpen || state.selection.size > 0 || !!openShow() || (state.view === 'movies' && state.detailId !== null);
+  TV.pickerOpen() || !!closeCurrentModal || state.filtersOpen || state.selection.size > 0 || !!openShow() || (state.view === 'movies' && state.detailId !== null);
 
 /** Adds or removes the history entry; deferred so a dialog replacing another one counts as one. */
 function syncHistory() {
@@ -3298,7 +3442,8 @@ function syncHistory() {
 }
 
 function closeTopLayer() {
-  if (closeCurrentModal) closeCurrentModal();
+  if (TV.pickerOpen()) TV.closePicker();
+  else if (closeCurrentModal) closeCurrentModal();
   else if (state.filtersOpen) setFiltersOpen(false);
   else if (state.selection.size) {
     state.selection.clear();
@@ -3681,6 +3826,13 @@ function bindEvents() {
   });
 }
 
+function enableTvMode() {
+  IS_TV = true;
+  document.body.classList.add('tv');
+  applyLayout();
+  TV.enable({ onLayerChange: syncHistory, showKeyboard: () => call('show_keyboard') });
+}
+
 async function init() {
   loadPrefs();
   applyLayout();
@@ -3724,6 +3876,7 @@ async function init() {
     $('#loading-text').textContent = t('Zpracovávám nové soubory… {done} / {total}', e.payload);
   });
   state.settings = (await call('get_settings')) || null;
+  if (state.settings?.tv) enableTvMode();
   // Until chosen, the system language decides (Czech and Slovak -> Czech, others -> English).
   // Android stores it each start: its player plugin keeps it only while running.
   const lang = state.settings?.language || (/^(cs|sk)\b/i.test(navigator.language) ? 'cs' : 'en');

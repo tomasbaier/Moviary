@@ -18,6 +18,8 @@ use crate::segments::{ManualTimes, Segments};
 use crate::tracks::{TrackChoice, TrackRules};
 
 pub const VERSION: u32 = 2;
+/// Suggestions are asked for again after this many seconds (30 days).
+const SUGGESTIONS_MAX_AGE: u64 = 30 * 24 * 60 * 60;
 
 #[derive(Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -309,9 +311,45 @@ pub struct Record {
     /// Intro and credits times the user set; they always win over TheIntroDB's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_times: Option<ManualTimes>,
+    /// Titles TMDB suggests, also those not in the library; downloaded when first shown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestions: Option<SuggestionCache>,
     /// Fields of newer versions, kept as they are so that this version does not drop them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, Value>,
+}
+
+/// A title TMDB recommends for a movie or series.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Suggestion {
+    pub tmdb_id: u64,
+    pub title: String,
+    pub year: Option<u32>,
+    /// TMDB rating, 0 = none.
+    pub rating: f64,
+    pub overview: String,
+    pub poster_url: Option<String>,
+}
+
+/// Suggestions of one title as downloaded.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SuggestionCache {
+    /// The TMDB match they were asked for; another match needs other suggestions.
+    pub tmdb_id: u64,
+    /// Language of the titles and overviews: "cs" or "en".
+    pub language: String,
+    /// Unix timestamp.
+    pub fetched: u64,
+    pub items: Vec<Suggestion>,
+}
+
+impl SuggestionCache {
+    /// Can be shown without asking TMDB again.
+    pub fn fresh(&self, tmdb_id: u64, language: &str, now: u64) -> bool {
+        self.tmdb_id == tmdb_id && self.language == language && now.saturating_sub(self.fetched) < SUGGESTIONS_MAX_AGE
+    }
 }
 
 /// Movie information from TMDB.
@@ -409,6 +447,9 @@ pub struct Show {
     pub status: Option<String>,
     /// Next episode announced on TMDB.
     pub next_episode: Option<NextEpisode>,
+    /// Titles TMDB suggests, also those not in the library; downloaded when first shown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestions: Option<SuggestionCache>,
     /// Fields of newer versions, kept as they are so that this version does not drop them.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, Value>,
@@ -686,6 +727,15 @@ fn migrate(old: LegacyDb) -> Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suggestions_are_reused_for_the_same_match_and_language() {
+        let cache = SuggestionCache { tmdb_id: 7, language: "cs".into(), fetched: 1000, items: Vec::new() };
+        assert!(cache.fresh(7, "cs", 1000 + SUGGESTIONS_MAX_AGE - 1));
+        assert!(!cache.fresh(7, "cs", 1000 + SUGGESTIONS_MAX_AGE));
+        assert!(!cache.fresh(8, "cs", 1000));
+        assert!(!cache.fresh(7, "en", 1000));
+    }
 
     #[test]
     fn keeps_fields_of_newer_versions() {

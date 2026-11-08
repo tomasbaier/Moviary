@@ -408,10 +408,45 @@ pub fn folders_overlap(a: &str, b: &str) -> bool {
     a.starts_with(&b) || b.starts_with(&a)
 }
 
+/// A folder offered when browsing on a TV.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct Folder {
+    pub name: String,
+    pub path: String,
+}
+
+/// Folders directly in `dir`, by name.
+pub fn subfolders(dir: &Path) -> Result<Vec<Folder>, String> {
+    let entries = std::fs::read_dir(dir).map_err(|e| tr!("Složku nelze otevřít: {e}", "Cannot open the folder: {e}"))?;
+    let mut folders: Vec<Folder> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            (!scanner::skip_dir(&name)).then(|| Folder { name, path: entry.path().to_string_lossy().to_string() })
+        })
+        .collect();
+    folders.sort_by_key(|f| f.name.to_lowercase());
+    Ok(folders)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn subfolders_are_sorted_without_hidden_ones() {
+        let dir = std::env::temp_dir().join(format!("moviary-folders-{}", std::process::id()));
+        for name in ["zeta", "Alfa", ".skryta", "$RECYCLE.BIN"] {
+            fs::create_dir_all(dir.join(name)).unwrap();
+        }
+        fs::write(dir.join("film.mkv"), b"x").unwrap();
+        let names: Vec<String> = subfolders(&dir).unwrap().into_iter().map(|f| f.name).collect();
+        assert_eq!(names, ["Alfa", "zeta"]);
+        assert!(subfolders(&dir.join("neni")).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     fn scan(db: &mut Db) -> HashMap<u64, PathBuf> {
         let (files, _) = scan_folders(&db.libraries, scan_library);

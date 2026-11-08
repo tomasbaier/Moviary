@@ -112,6 +112,30 @@ fn vlc_info(app: &AppHandle) -> Option<VlcInfo> {
     call::<VlcInfo>(app, "checkVlc", json!({})).ok()
 }
 
+#[derive(Deserialize)]
+struct DeviceInfo {
+    tv: bool,
+}
+
+/// Running on Android TV.
+pub fn is_tv(app: &AppHandle) -> bool {
+    call::<DeviceInfo>(app, "deviceInfo", json!({})).is_ok_and(|d| d.tv)
+}
+
+pub fn show_keyboard(app: &AppHandle) {
+    let _ = call::<serde_json::Value>(app, "showKeyboard", json!({}));
+}
+
+#[derive(Deserialize)]
+struct Roots {
+    roots: Vec<library::Folder>,
+}
+
+/// Internal storage and connected drives.
+pub fn storage_roots(app: &AppHandle) -> Result<Vec<library::Folder>, String> {
+    call::<Roots>(app, "storageRoots", json!({})).map(|r| r.roots)
+}
+
 /// VLC for Android cannot be asked while it plays.
 pub fn current_time(_id: u64) -> Option<f64> {
     None

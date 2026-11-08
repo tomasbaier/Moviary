@@ -20,7 +20,7 @@ mod vlc;
 mod watch;
 
 // The player: VLC on Windows, VLC for Android on Android. Both modules offer the same
-// functions (`detected`, `play`, `current_time`, `Thumbnailer`).
+// functions (`detected`, `play`, `current_time`, `is_tv`, `Thumbnailer`…).
 #[cfg(mobile)]
 use mobile as player;
 #[cfg(desktop)]
@@ -93,11 +93,14 @@ struct SettingsView {
     backups_dir: String,
     /// A newer version saved the data, so this one only reads it.
     newer_data: Option<String>,
+    /// Running on Android TV: controlled with a remote.
+    tv: bool,
 }
 
 /// Blocks on Android (asks the plugin about VLC) – call only from async commands.
 fn settings_view(app: &AppHandle) -> SettingsView {
     let vlc_detected = player::detected(app);
+    let tv = player::is_tv(app);
     let state = app.state::<AppState>();
     let db = state.db.lock().unwrap();
     SettingsView {
@@ -121,6 +124,7 @@ fn settings_view(app: &AppHandle) -> SettingsView {
         languages: media::language_names(),
         backups_dir: state.backups_dir.to_string_lossy().to_string(),
         newer_data: db.newer_version.clone(),
+        tv,
     }
 }
 
@@ -823,8 +827,19 @@ async fn open_link(app: AppHandle, link: String) -> Result<(), String> {
         .find(|(name, _)| *name == link)
         .map(|(_, url)| *url)
         .ok_or_else(|| format!("Unknown link: {link}"))?;
+    open_url(app, url.to_string()).await
+}
+
+/// Opens the page of a movie or series on TMDB in the default browser.
+#[tauri::command]
+async fn open_tmdb(app: AppHandle, tmdb_id: u64, tv: bool) -> Result<(), String> {
+    open_url(app, format!("https://www.themoviedb.org/{}/{tmdb_id}", if tv { "tv" } else { "movie" })).await
+}
+
+/// `url` must come from the app itself, not from data.
+async fn open_url(app: AppHandle, url: String) -> Result<(), String> {
     #[cfg(mobile)]
-    return tauri::async_runtime::spawn_blocking(move || mobile::open_url(&app, url))
+    return tauri::async_runtime::spawn_blocking(move || mobile::open_url(&app, &url))
         .await
         .map_err(|e| e.to_string())?;
     #[cfg(desktop)]
@@ -833,6 +848,53 @@ async fn open_link(app: AppHandle, link: String) -> Result<(), String> {
         // Explorer hands a URL to the default browser.
         std::process::Command::new("explorer").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
+}
+
+/// Titles TMDB suggests for the movie or series `id`: saved ones when recent enough, older
+/// ones when TMDB cannot be reached.
+#[tauri::command]
+async fn get_suggestions(app: AppHandle, id: u64, tv: bool) -> Result<Vec<db::Suggestion>, String> {
+    tauri::async_runtime::spawn_blocking(move || suggestions_for(&app, id, tv))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn suggestions_for(app: &AppHandle, id: u64, tv: bool) -> Result<Vec<db::Suggestion>, String> {
+    let state = app.state::<AppState>();
+    let language = if i18n::english() { "en" } else { "cs" };
+    let (tmdb_id, cached) = {
+        let db = state.db.lock().unwrap();
+        let (meta, cached) = if tv {
+            db.shows.get(&id).map(|s| (s.meta.as_ref(), s.suggestions.clone())).unzip()
+        } else {
+            db.records.get(&id).map(|r| (r.meta.as_ref(), r.suggestions.clone())).unzip()
+        };
+        (meta.flatten().map(|m| m.tmdb_id), cached.flatten())
+    };
+    let Some(tmdb_id) = tmdb_id else {
+        return Ok(Vec::new());
+    };
+    let cached = cached.filter(|c| c.tmdb_id == tmdb_id);
+    if let Some(cache) = cached.as_ref().filter(|c| c.fresh(tmdb_id, language, db::now())) {
+        return Ok(cache.items.clone());
+    }
+    let client = tmdb_client(&state)?;
+    let items = match client.suggestions(tmdb_id, tv) {
+        Ok(items) => items,
+        Err(e) => return cached.map(|c| c.items).ok_or_else(|| e.into()),
+    };
+    let cache = db::SuggestionCache { tmdb_id, language: language.to_string(), fetched: db::now(), items: items.clone() };
+    let mut db = state.db.lock().unwrap();
+    if tv {
+        if let Some(show) = db.shows.get_mut(&id) {
+            show.suggestions = Some(cache);
+        }
+    } else if let Some(record) = db.records.get_mut(&id) {
+        record.suggestions = Some(cache);
+    }
+    // Only a cache: with data of a newer version it just is not kept.
+    let _ = db.save(&state.db_path);
+    Ok(items)
 }
 
 // ---------- updates ----------
@@ -874,6 +936,28 @@ async fn pick_folder(app: AppHandle) -> Result<Option<serde_json::Value>, String
         let _ = app;
         Err(tr!("Výběr složky zajišťuje dialog.", "Folders are chosen with the dialog."))
     }
+}
+
+/// Internal storage and connected drives, for browsing folders on a TV.
+#[tauri::command]
+async fn storage_roots(app: AppHandle) -> Result<Vec<library::Folder>, String> {
+    tauri::async_runtime::spawn_blocking(move || player::storage_roots(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Folders directly in `path`.
+#[tauri::command]
+async fn list_folders(path: String) -> Result<Vec<library::Folder>, String> {
+    library::subfolders(Path::new(&path))
+}
+
+/// Opens the on-screen keyboard for the field focused with the remote.
+#[tauri::command]
+async fn show_keyboard(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || player::show_keyboard(&app))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Whether the app may read the video files; with `request` asks the user first.
@@ -1166,6 +1250,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_data,
             open_link,
+            open_tmdb,
+            get_suggestions,
             set_movie_personal,
             set_show_personal,
             bulk_set_wishlist,
@@ -1209,6 +1295,9 @@ pub fn run() {
             set_language,
             pick_folder,
             storage_access,
+            storage_roots,
+            list_folders,
+            show_keyboard,
             install_vlc,
             set_movie_tracks,
             set_show_tracks,

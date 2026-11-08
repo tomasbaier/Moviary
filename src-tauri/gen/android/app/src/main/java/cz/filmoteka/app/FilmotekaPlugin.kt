@@ -2,9 +2,11 @@ package cz.filmoteka.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.UiModeManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -14,7 +16,10 @@ import android.os.StrictMode
 import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
+import android.webkit.WebView
 import androidx.activity.result.ActivityResult
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import app.tauri.annotation.ActivityCallback
@@ -82,13 +87,91 @@ class FrameArgs {
  * [listTree] and files are read with [openFile]. Files are then `content://` URIs.
  */
 @TauriPlugin(
-  permissions = [Permission(strings = [Manifest.permission.READ_EXTERNAL_STORAGE], alias = "storage")]
+  permissions = [
+    Permission(strings = [Manifest.permission.READ_EXTERNAL_STORAGE], alias = "storage"),
+    Permission(strings = [Manifest.permission.READ_MEDIA_VIDEO], alias = "video"),
+  ]
 )
 class FilmotekaPlugin(private val activity: Activity) : Plugin(activity) {
   init {
     // VLC gets a file:// URI so it reads the file itself and finds subtitles next to it.
     // Android 7+ forbids file:// URIs in intents by default.
     StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder().build())
+  }
+
+  private var page: WebView? = null
+
+  override fun load(webView: WebView) {
+    super.load(webView)
+    page = webView
+    focusPage()
+  }
+
+  override fun onResume(activity: AppCompatActivity) {
+    super.onResume(activity)
+    focusPage()
+  }
+
+  // ---------- Android TV ----------
+
+  private fun isTv(): Boolean =
+    activity.getSystemService(UiModeManager::class.java)?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+      activity.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+
+  /** A remote has no touch: without the focus the page would not get its keys. */
+  private fun focusPage() {
+    if (!isTv()) return
+    activity.runOnUiThread {
+      page?.apply {
+        isFocusable = true
+        isFocusableInTouchMode = true
+        requestFocus()
+      }
+    }
+  }
+
+  @Command
+  fun deviceInfo(invoke: Invoke) {
+    val ret = JSObject()
+    ret.put("tv", isTv())
+    invoke.resolve(ret)
+  }
+
+  /** Opens the on-screen keyboard for the text field focused with the remote. */
+  @Command
+  fun showKeyboard(invoke: Invoke) {
+    activity.runOnUiThread {
+      val view = page
+      if (view != null) {
+        view.requestFocus()
+        activity.getSystemService(InputMethodManager::class.java)?.showSoftInput(view, 0)
+      }
+      invoke.resolve()
+    }
+  }
+
+  /** Internal storage and connected drives, for browsing folders on a TV. */
+  @Command
+  fun storageRoots(invoke: Invoke) {
+    val roots = JSArray()
+    val seen = mutableSetOf<String>()
+    fun add(name: String, dir: File?) {
+      if (dir == null || !seen.add(dir.path)) return
+      val root = JSObject()
+      root.put("name", name)
+      root.put("path", dir.path)
+      roots.put(root)
+    }
+    add(tr("Interní úložiště", "Internal storage"), Environment.getExternalStorageDirectory())
+    activity.getSystemService(StorageManager::class.java)?.storageVolumes?.forEach { volume ->
+      if (volume.state == Environment.MEDIA_MOUNTED || volume.state == Environment.MEDIA_MOUNTED_READ_ONLY) {
+        val dir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) volume.directory else volume.uuid?.let { File("/storage/$it") }
+        add(volume.getDescription(activity), dir)
+      }
+    }
+    val ret = JSObject()
+    ret.put("roots", roots)
+    invoke.resolve(ret)
   }
 
   @Command
@@ -365,9 +448,17 @@ class FilmotekaPlugin(private val activity: Activity) : Plugin(activity) {
 
   // ---------- access to files ----------
 
+  private fun mediaPermission(): String =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      Manifest.permission.READ_MEDIA_VIDEO
+    } else {
+      Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+
   private fun hasStorage(): Boolean =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      Environment.isExternalStorageManager()
+      Environment.isExternalStorageManager() ||
+        (isTv() && ContextCompat.checkSelfPermission(activity, mediaPermission()) == PackageManager.PERMISSION_GRANTED)
     } else {
       ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_EXTERNAL_STORAGE) ==
         PackageManager.PERMISSION_GRANTED
@@ -387,7 +478,11 @@ class FilmotekaPlugin(private val activity: Activity) : Plugin(activity) {
       resolveStorage(invoke)
       return
     }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    if (isTv()) {
+      // The usual permission dialog: it can be answered with the remote.
+      val alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) "video" else "storage"
+      requestPermissionForAlias(alias, invoke, "onStoragePermission")
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       val intent = Intent(
         Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
         Uri.parse("package:${activity.packageName}")
