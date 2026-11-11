@@ -529,7 +529,6 @@ const EN = {
   "Časy intra a titulků jsou uložené.": "The intro and credits times are saved.",
   "Pište jen číslice, dvojtečka se doplní sama: 2410 je 24:10 a 045 je 0:45. Vlastní časy mají vždy přednost a stažení z TheIntroDB je nikdy nepřepíše.": "Type digits only, the colon is added for you: 2410 is 24:10 and 045 is 0:45. Your own times always come first and a download from TheIntroDB never replaces them.",
   "Intro končí v": "The intro ends at",
-  "Počítá se vždy od začátku epizody, ta pak začne až v tomto čase.": "It always counts from the start of the episode, which then begins at this time.",
   "Titulky začínají v": "The credits start at",
   "Neplatný čas – zadejte ho jako 01:23.": "Invalid time – enter it as 01:23.",
   "Starší verze Moviary": "An older version of Moviary",
@@ -549,4 +548,10 @@ const EN = {
   "Popis není k dispozici.": "No overview available.",
   "Seriál": "Series",
   "Film": "Movie",
+  "Od": "From",
+  "Do": "To",
+  "Začátek nemusíte vyplnit, pak se počítá od 0:00. Intro na začátku epizody se přeskočí hned, ta začne až v jeho konci.": "You can leave the start empty, then it is 0:00. An intro at the start of the episode is skipped right away: the episode begins at its end.",
+  "Na Androidu se přeskočí jen intro, které začíná v 0:00.": "On Android only an intro starting at 0:00 is skipped.",
+  "Konec intra musí být po jeho začátku.": "The end of the intro must come after its start.",
+  "Intro musí trvat aspoň 3 sekundy.": "The intro must last at least 3 seconds.",
 };
