@@ -1058,3 +1058,10 @@ body.tv { padding: 14px 24px; }
 .suggestion-preview .poster { flex: none; width: 130px; }
 .suggestion-preview h2 { margin: 0 0 4px; }
 .suggestion-preview p { margin: 12px 0 0; max-height: 34vh; overflow-y: auto; }
+.suggestion-details:empty { display: none; }
+.suggestion-details { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: 13px; }
+.suggestion-details .chips { margin: 2px 0; }
+.suggestion-details .detail-line span { color: var(--text-3); }
+.suggestion-seasons { display: flex; flex-direction: column; gap: 2px; max-height: 150px; margin-top: 4px; padding: 6px 10px; overflow-y: auto; background: var(--bg-3); border-radius: 8px; }
+.suggestion-seasons div { display: flex; justify-content: space-between; gap: 12px; }
+.suggestion-seasons span { color: var(--text-2); white-space: nowrap; }

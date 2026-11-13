@@ -49,6 +49,36 @@ pub struct ShowInfo {
     pub next_episode: Option<NextEpisode>,
 }
 
+/// More about a suggested title, shown in its preview.
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TitleDetails {
+    pub original_title: String,
+    pub genres: Vec<String>,
+    /// Minutes: of the movie, or of an episode; 0 = unknown.
+    pub runtime: u32,
+    /// Directors of a movie, creators of a series.
+    pub directors: Vec<String>,
+    pub cast: Vec<String>,
+    /// The movie series a movie belongs to.
+    pub collection: Option<String>,
+    /// TMDB status of a series: "Returning Series", "Ended", "Canceled"…
+    pub status: String,
+    pub networks: Vec<String>,
+    /// Seasons of a series, without the specials.
+    pub seasons: Vec<SeasonInfo>,
+    pub episode_count: u32,
+}
+
+#[derive(Serialize, Default, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonInfo {
+    pub number: u32,
+    pub name: String,
+    pub episodes: u32,
+    pub year: Option<u32>,
+}
+
 /// Search result offered to the user when picking a match by hand.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -144,6 +174,14 @@ impl Client {
         let language = if crate::i18n::english() { ENGLISH } else { LANGUAGE };
         let v = self.get(&path, &[("language", language), ("append_to_response", "recommendations,similar")])?;
         Ok(suggestions(&v))
+    }
+
+    /// Details of a suggested title (not in the library), in the language of the app.
+    pub fn title_details(&self, id: u64, tv: bool) -> Result<TitleDetails, Error> {
+        let path = format!("/{}/{id}", if tv { "tv" } else { "movie" });
+        let language = if crate::i18n::english() { ENGLISH } else { LANGUAGE };
+        let v = self.get(&path, &[("language", language), ("append_to_response", "credits")])?;
+        Ok(title_details(&v, tv))
     }
 
     /// Full details in Czech and English; the poster is downloaded into `posters_dir`.
@@ -433,6 +471,57 @@ fn similar(v: &Value) -> Vec<u64> {
     ids
 }
 
+/// Main cast in a details response with credits.
+const DETAILS_CAST: usize = 6;
+
+fn title_details(v: &Value, tv: bool) -> TitleDetails {
+    let list = |field: &str, key: &str| -> Vec<String> {
+        v[field].as_array().into_iter().flatten().map(|x| text(&x[key])).filter(|s| !s.is_empty()).collect()
+    };
+    let cast = v["credits"]["cast"].as_array().into_iter().flatten()
+        .take(DETAILS_CAST).map(|p| text(&p["name"])).filter(|s| !s.is_empty()).collect();
+    if !tv {
+        let directors = v["credits"]["crew"].as_array().into_iter().flatten()
+            .filter(|c| c["job"] == "Director").map(|c| text(&c["name"])).collect();
+        return TitleDetails {
+            original_title: text(&v["original_title"]),
+            genres: genres(v),
+            runtime: v["runtime"].as_u64().unwrap_or(0) as u32,
+            directors,
+            cast,
+            collection: Some(text(&v["belongs_to_collection"]["name"])).filter(|s| !s.is_empty()),
+            ..TitleDetails::default()
+        };
+    }
+    let seasons: Vec<SeasonInfo> = v["seasons"].as_array().into_iter().flatten()
+        .filter_map(|s| {
+            let number = s["season_number"].as_u64()? as u32;
+            (number > 0).then(|| SeasonInfo {
+                number,
+                name: text(&s["name"]),
+                episodes: s["episode_count"].as_u64().unwrap_or(0) as u32,
+                year: year_of(&text(&s["air_date"])),
+            })
+        })
+        .collect();
+    let runtime = v["episode_run_time"][0].as_u64()
+        .or_else(|| v["last_episode_to_air"]["runtime"].as_u64())
+        .unwrap_or(0) as u32;
+    TitleDetails {
+        original_title: text(&v["original_name"]),
+        genres: genres(v),
+        runtime,
+        directors: list("created_by", "name"),
+        cast,
+        status: text(&v["status"]),
+        networks: list("networks", "name"),
+        episode_count: v["number_of_episodes"].as_u64().map(|n| n as u32)
+            .unwrap_or_else(|| seasons.iter().map(|s| s.episodes).sum()),
+        seasons,
+        ..TitleDetails::default()
+    }
+}
+
 /// Recommended, then similar titles of a details response.
 fn suggestions(v: &Value) -> Vec<Suggestion> {
     let mut found: Vec<Suggestion> = Vec::new();
@@ -583,6 +672,44 @@ pub fn best_match<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn title_details_of_a_series_and_a_movie() {
+        let series = serde_json::json!({
+            "original_name": "Breaking Bad", "status": "Ended", "number_of_episodes": 62,
+            "episode_run_time": [], "last_episode_to_air": { "runtime": 47 },
+            "genres": [{ "name": "Drama" }], "created_by": [{ "name": "Vince Gilligan" }],
+            "networks": [{ "name": "AMC" }],
+            "credits": { "cast": [{ "name": "Bryan Cranston" }, { "name": "Aaron Paul" }] },
+            "seasons": [
+                { "season_number": 0, "name": "Speciály", "episode_count": 9 },
+                { "season_number": 1, "name": "Řada 1", "episode_count": 7, "air_date": "2008-01-20" },
+                { "season_number": 2, "name": "Řada 2", "episode_count": 13, "air_date": null }
+            ]
+        });
+        let d = title_details(&series, true);
+        assert_eq!(d.original_title, "Breaking Bad");
+        assert_eq!((d.runtime, d.episode_count, d.status.as_str()), (47, 62, "Ended"));
+        assert_eq!(d.directors, ["Vince Gilligan"]);
+        assert_eq!(d.networks, ["AMC"]);
+        assert_eq!(d.cast, ["Bryan Cranston", "Aaron Paul"]);
+        assert_eq!(d.seasons, [
+            SeasonInfo { number: 1, name: "Řada 1".into(), episodes: 7, year: Some(2008) },
+            SeasonInfo { number: 2, name: "Řada 2".into(), episodes: 13, year: None },
+        ]);
+        // Without the total the seasons are added up.
+        let d = title_details(&serde_json::json!({ "seasons": [{ "season_number": 1, "episode_count": 5 }] }), true);
+        assert_eq!(d.episode_count, 5);
+
+        let movie = serde_json::json!({
+            "original_title": "Inception", "runtime": 148, "genres": [{ "name": "Sci-Fi" }],
+            "belongs_to_collection": null,
+            "credits": { "crew": [{ "job": "Director", "name": "Christopher Nolan" }, { "job": "Writer", "name": "X" }] }
+        });
+        let d = title_details(&movie, false);
+        assert_eq!((d.runtime, d.directors.as_slice(), d.collection.as_deref()), (148, ["Christopher Nolan".to_string()].as_slice(), None));
+        assert!(d.seasons.is_empty());
+    }
 
     #[test]
     fn suggestions_merge_both_lists_for_movies_and_series() {

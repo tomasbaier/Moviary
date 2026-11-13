@@ -859,6 +859,17 @@ async fn get_suggestions(app: AppHandle, id: u64, tv: bool) -> Result<Vec<db::Su
         .map_err(|e| e.to_string())?
 }
 
+/// More about a suggested title (seasons, runtime, people), for its preview.
+#[tauri::command]
+async fn get_title_details(app: AppHandle, tmdb_id: u64, tv: bool) -> Result<tmdb::TitleDetails, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = tmdb_client(&app.state::<AppState>())?;
+        client.title_details(tmdb_id, tv).map_err(String::from)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn suggestions_for(app: &AppHandle, id: u64, tv: bool) -> Result<Vec<db::Suggestion>, String> {
     let state = app.state::<AppState>();
     let language = if i18n::english() { "en" } else { "cs" };
@@ -1252,6 +1263,7 @@ pub fn run() {
             open_link,
             open_tmdb,
             get_suggestions,
+            get_title_details,
             set_movie_personal,
             set_show_personal,
             bulk_set_wishlist,

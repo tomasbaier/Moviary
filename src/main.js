@@ -2678,6 +2678,7 @@ async function openDuplicates() {
 async function setLanguage(lang, save = true) {
   LANG = lang === 'en' ? 'en' : 'cs';
   suggestions.clear();
+  titleDetails.clear();
   collator = new Intl.Collator(LANG, { sensitivity: 'base', numeric: true });
   $('#lang-code').textContent = LANG.toUpperCase();
   translatePage();
@@ -2938,6 +2939,49 @@ function suggestionsSlot(m) {
   return `<div class="suggestions" data-suggestions="${key}">${suggestionsBody(key)}</div>`;
 }
 
+/** Details of suggested titles by "tv:id" / "movie:id", kept while the app runs. */
+const titleDetails = new Map();
+
+async function fetchTitleDetails(tmdbId, tv) {
+  try {
+    return await invoke('get_title_details', { tmdbId, tv });
+  } catch {
+    return null;
+  }
+}
+
+const SERIES_STATUS = {
+  'Returning Series': 'Pokračuje', Ended: 'Ukončený', Canceled: 'Zrušený', 'In Production': 'Ve výrobě', Planned: 'Plánovaný',
+};
+
+/** The details part of a suggestion preview. */
+function titleDetailsHtml(d, s, tv) {
+  const line = (label, values) => (values?.length ? `<div class="detail-line"><span>${label}</span> ${esc(values.join(', '))}</div>` : '');
+  const parts = [];
+  if (d.originalTitle && d.originalTitle !== s.title) parts.push(`<div class="muted">${esc(d.originalTitle)}</div>`);
+  if (tv) {
+    const facts = [
+      d.seasons.length ? `${d.seasons.length} ${plural(d.seasons.length, 'sezóna', 'sezóny', 'sezón')}` : null,
+      d.episodeCount ? `${d.episodeCount} ${plural(d.episodeCount, 'epizoda', 'epizody', 'epizod')}` : null,
+      d.runtime ? t('≈ {time} na díl', { time: fmtRuntime(d.runtime) }) : null,
+      SERIES_STATUS[d.status] ? t(SERIES_STATUS[d.status]) : null,
+    ].filter(Boolean);
+    if (facts.length) parts.push(`<div class="detail-facts">${facts.join(' · ')}</div>`);
+  } else if (d.runtime) {
+    parts.push(`<div class="detail-facts">${fmtRuntime(d.runtime)}</div>`);
+  }
+  if (d.genres.length) parts.push(`<div class="chips">${d.genres.map((g) => `<span class="chip">${esc(g)}</span>`).join('')}</div>`);
+  parts.push(line(tv ? t('Tvůrci:') : t('Režie:'), d.directors));
+  if (tv) parts.push(line(t('Stanice:'), d.networks));
+  parts.push(line(t('Hrají:'), d.cast));
+  if (d.collection) parts.push(line(t('Filmová série:'), [d.collection]));
+  if (tv && d.seasons.length) {
+    parts.push(`<div class="suggestion-seasons">${d.seasons.map((x) => `
+      <div><b>${esc(x.name || t('{n}. sezóna', { n: x.number }))}</b><span>${x.episodes} ${plural(x.episodes, 'díl', 'díly', 'dílů')}${x.year ? ` · ${x.year}` : ''}</span></div>`).join('')}</div>`);
+  }
+  return parts.join('');
+}
+
 function openSuggestion(key, tmdbId) {
   const s = suggestions.get(key)?.find((x) => x.tmdbId === tmdbId);
   if (!s) return;
@@ -2952,6 +2996,7 @@ function openSuggestion(key, tmdbId) {
       <div>
         <h2>${esc(s.title)}</h2>
         <div class="muted">${facts}</div>
+        <div class="suggestion-details"></div>
         <p>${esc(s.overview || t('Popis není k dispozici.'))}</p>
       </div>
     </div>
@@ -2961,6 +3006,18 @@ function openSuggestion(key, tmdbId) {
     </div>`);
   el.querySelector('[data-act="close"]').addEventListener('click', close);
   el.querySelector('[data-act="tmdb"]').addEventListener('click', () => call('open_tmdb', { tmdbId: s.tmdbId, tv }));
+  // Filled in when TMDB answers; the preview works without it.
+  const detailsKey = `${tv ? 'tv' : 'movie'}:${s.tmdbId}`;
+  const show = (d) => {
+    if (d && el.isConnected) el.querySelector('.suggestion-details').innerHTML = titleDetailsHtml(d, s, tv);
+  };
+  if (titleDetails.has(detailsKey)) show(titleDetails.get(detailsKey));
+  else {
+    fetchTitleDetails(s.tmdbId, tv).then((d) => {
+      if (d) titleDetails.set(detailsKey, d);
+      show(d);
+    });
+  }
 }
 
 /** Parts of the movie series `m` belongs to, with what the library has and what was watched. */
