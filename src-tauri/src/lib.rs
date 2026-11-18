@@ -241,16 +241,32 @@ async fn scan(app: AppHandle) -> Result<AppData, String> {
 
 /// `label` names a folder URI (Android).
 #[tauri::command]
-async fn add_library(app: AppHandle, path: String, label: Option<String>) -> Result<AppData, String> {
+async fn add_library(app: AppHandle, path: String, label: Option<String>, anime: Option<bool>) -> Result<AppData, String> {
     {
         let state = app.state::<AppState>();
         check_folder(&state, &path, None)?;
         let mut db = state.db.lock().unwrap();
         let id = db.new_id();
-        db.libraries.push(db::LibraryDir { id, path, label });
+        db.libraries.push(db::LibraryDir { id, path, label, anime: anime.unwrap_or(false) });
         db.save(&state.db_path)?;
     }
     scan_and_report(app).await
+}
+
+/// Marks a folder as one with anime (its titles move to the Anime tab) or back.
+#[tauri::command]
+fn set_library_anime(state: State<AppState>, id: u64, anime: bool) -> Result<AppData, String> {
+    {
+        let mut db = state.db.lock().unwrap();
+        let library = db
+            .libraries
+            .iter_mut()
+            .find(|l| l.id == id)
+            .ok_or_else(|| tr!("Složka nebyla nalezena.", "Folder not found."))?;
+        library.anime = anime;
+        db.save(&state.db_path)?;
+    }
+    Ok(view::app_data(&state))
 }
 
 #[tauri::command]
@@ -1276,6 +1292,7 @@ pub fn run() {
             scan,
             add_library,
             relocate_library,
+            set_library_anime,
             remove_library,
             cleanup_missing,
             create_category,

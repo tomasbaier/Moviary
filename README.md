@@ -103,6 +103,8 @@ znovu `npm run screenshots`, viz [scripts/screenshots/take.js](scripts/screensho
   všechny filmy a seriály daného člověka, hledat jde i podle herců.
 - Filmové série (kolekce TMDB): díly v pořadí s tím, co je v knihovně, co je zhlédnuté a co chybí,
   tlačítko „Pokračovat dalším dílem“ a filtr celé série.
+- Anime: složku lze v Nastavení označit jako „Anime“ (nebo ji přidat tlačítkem „Přidat složku s anime“).
+  Její filmy a seriály mají vlastní záložku Anime a ve Filmech a Seriálech se neukazují.
 - Podobné ve vaší knihovně: doporučení TMDB omezená na tituly, které máte.
 - Mohlo by se vám líbit: doporučení TMDB, která v knihovně nemáte, s náhledem a odkazem na TMDB.
   Načtou se při prvním otevření detailu a na 30 dní se uloží.

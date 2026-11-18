@@ -253,6 +253,9 @@ pub struct LibraryDir {
     /// Name shown for a `content://` folder ("USB disk/Filmy").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// A folder with anime: its movies and series have their own tab.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub anime: bool,
 }
 
 impl LibraryDir {
@@ -699,6 +702,7 @@ fn migrate(old: LegacyDb) -> Db {
         id: library,
         path: root.clone(),
         label: None,
+        anime: false,
     });
     for (abs, movie) in old.movies {
         let Ok(rel) = Path::new(&abs).strip_prefix(&root) else {

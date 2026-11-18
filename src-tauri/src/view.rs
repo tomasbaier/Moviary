@@ -257,6 +257,8 @@ pub struct LibraryInfo {
     name: String,
     online: bool,
     count: usize,
+    /// Its movies and series are in the Anime tab.
+    anime: bool,
 }
 
 #[derive(Serialize)]
@@ -515,6 +517,7 @@ pub fn app_data(state: &AppState) -> AppData {
                 .unwrap_or_else(|| l.display_path()),
             online: scan.online.contains(&l.id),
             count: movies.iter().filter(|m| m.library_id == l.id).count(),
+            anime: l.anime,
         })
         .collect();
 

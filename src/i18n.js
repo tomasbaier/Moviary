@@ -39,6 +39,7 @@ function translatePage() {
 // Czech singular -> English singular and plural.
 const EN_PLURALS = {
   "film": ["movie", "movies"],
+  "titul": ["title", "titles"],
   "seriál": ["series", "series"],
   "sezóna": ["season", "seasons"],
   "epizoda": ["episode", "episodes"],
@@ -566,4 +567,13 @@ const EN = {
   "Stanice:": "Network:",
   "Hrají:": "Starring:",
   "Filmová série:": "Collection:",
+  "Anime": "Anime",
+  "Všechno anime": "All anime",
+  "Žádné anime": "No anime",
+  "Ve složkách s anime nebyly nalezeny žádné video soubory.": "No video files were found in the folders with anime.",
+  "Přidat složku s anime": "Add a folder with anime",
+  "Žádný titul neodpovídá zvoleným filtrům.": "No title matches the chosen filters.",
+  "Vyberte složku s anime": "Choose a folder with anime",
+  "Filmy a seriály z této složky budou v záložce Anime.": "Movies and series from this folder will be in the Anime tab.",
+  "Anime se bere jen ze složek označených jako Anime. Mají vlastní záložku a ve Filmech a Seriálech se neukazují.": "Anime comes only from folders marked as Anime. They have their own tab and do not appear under Movies and Series.",
 };

@@ -56,6 +56,8 @@ const state = {
 // Movies (without episodes) and shows with their episodes; rebuilt on every render.
 let movieItems = [];
 let showItems = [];
+/** Ids of the folders with anime: their movies and series are in the Anime tab only. */
+let animeLibs = new Set();
 // When the first video was added (the first scan); later ones can be "new".
 let firstAdded = null;
 // Items currently shown in the grid and categories in display order;
@@ -71,6 +73,7 @@ let closeCurrentModal = null;
 const VIEWS = {
   movies: { label: 'Filmy', all: 'Všechny filmy', noun: ['film', 'filmy', 'filmů'] },
   shows: { label: 'Seriály', all: 'Všechny seriály', noun: ['seriál', 'seriály', 'seriálů'] },
+  anime: { label: 'Anime', all: 'Všechno anime', noun: ['titul', 'tituly', 'titulů'] },
 };
 
 // Tests work for movies and for shows (see showItem).
@@ -116,6 +119,7 @@ const ICONS = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
   tv: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="m8 2 4 4 4-4"/></svg>',
   left: '<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>',
+  anime: '<svg viewBox="0 0 24 24"><path d="M12 3.5l2.5 5.3 5.8.7-4.3 4 1.1 5.7L12 16.4l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg>',
 };
 
 /** Name of a language code in the app's language ("cs" -> "čeština"); unknown codes in capitals. */
@@ -208,7 +212,16 @@ const canResume = (m) => m.position >= 10;
 const posterUrl = (name) => convertFileSrc(name, 'poster');
 const movieById = (id) => state.movies.find((m) => m.id === id);
 const showById = (id) => showItems.find((s) => s.id === id);
-const viewItems = () => (state.view === 'shows' ? showItems : movieItems);
+const isAnime = (m) => (m.isShow ? [...m.libraryIds].some((id) => animeLibs.has(id)) : animeLibs.has(m.libraryId));
+/** Movies, series, or both from the folders with anime. */
+function itemsOf(view) {
+  if (view === 'anime') return [...movieItems, ...showItems].filter(isAnime);
+  const list = view === 'shows' ? showItems : movieItems;
+  return animeLibs.size ? list.filter((m) => !isAnime(m)) : list;
+}
+const viewItems = () => itemsOf(state.view);
+/** The folders shown in the side panel of a tab. */
+const librariesOf = (view) => (animeLibs.size ? state.libraries.filter((l) => !!l.anime === (view === 'anime')) : state.libraries);
 const nounFor = (n) => plural(n, ...VIEWS[state.view].noun);
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -357,6 +370,8 @@ function savePrefs() {
 
 function applyData(data) {
   state.libraries = data.libraries;
+  animeLibs = new Set(data.libraries.filter((l) => l.anime).map((l) => l.id));
+  if (state.view === 'anime' && !animeLibs.size) state.view = 'movies';
   state.categories = data.categories;
   state.movies = data.movies;
   state.shows = data.shows;
@@ -426,7 +441,7 @@ function itemsFor(f) {
   const cats = f.selectedCats || [];
   const tech = Object.entries(f.tech || {}).map(([group, values]) => [group, new Set(values)]);
   const lib = f.libraryFilter ?? null;
-  return (f.view === 'shows' ? showItems : movieItems)
+  return itemsOf(f.view)
     .filter((m) => {
       if (!status.test(m)) return false;
       if (lib !== null && !(m.isShow ? m.libraryIds.has(lib) : m.libraryId === lib)) return false;
@@ -489,15 +504,16 @@ function render() {
 }
 
 function renderViewTabs() {
-  const counts = { movies: movieItems.length, shows: showItems.length };
-  $('#mode-tabs').innerHTML = Object.entries(VIEWS).map(([id, v]) => `
+  // The Anime tab is there once a folder with anime is.
+  document.body.classList.toggle('three-tabs', animeLibs.size > 0);
+  $('#mode-tabs').innerHTML = Object.entries(VIEWS).filter(([id]) => id !== 'anime' || animeLibs.size).map(([id, v]) => `
     <button class="${state.view === id ? 'active' : ''}" data-view="${id}">
-      ${id === 'shows' ? ICONS.tv : ICONS.film}<span>${t(v.label)}</span><span class="n">${counts[id]}</span>
+      ${ICONS[id === 'shows' ? 'tv' : id === 'anime' ? 'anime' : 'film']}<span>${t(v.label)}</span><span class="n">${itemsOf(id).length}</span>
     </button>`).join('');
 }
 
 /** The open show page, if any. */
-const openShow = () => (state.view === 'shows' && state.showId !== null ? showById(state.showId) : null);
+const openShow = () => (state.view !== 'movies' && state.showId !== null ? showById(state.showId) : null);
 
 function renderJob() {
   const el = $('#job');
@@ -526,8 +542,8 @@ function renderSidebar() {
       </button>`;
   }).join('');
 
-  $('#library-list').innerHTML = state.libraries.length
-    ? state.libraries.map((l) => `
+  $('#library-list').innerHTML = librariesOf(state.view).length
+    ? librariesOf(state.view).map((l) => `
       <button class="filter ${state.libraryFilter === l.id ? 'active' : ''} ${l.online ? '' : 'offline'}" data-lib="${l.id}" title="${esc(l.path)}${l.online ? '' : ` – ${t('nedostupná')}`}">
         <span class="dot ${l.online ? 'on' : 'off'}"></span>
         <span class="name">${esc(l.name)}</span>
@@ -738,6 +754,11 @@ function renderGrid() {
       `<button class="btn primary big" data-act="add-library">${ICONS.folder} ${t('Přidat složku')}</button>`);
     return;
   }
+  if (!total && state.view === 'anime') {
+    grid.innerHTML = emptyState(ICONS.anime, t('Žádné anime'), t('Ve složkách s anime nebyly nalezeny žádné video soubory.'),
+      `<button class="btn" data-act="add-library">${ICONS.folder} ${t('Přidat složku s anime')}</button>`);
+    return;
+  }
   if (!total && shows) {
     grid.innerHTML = emptyState(ICONS.tv, t('Žádné seriály'),
       t('Seriály se poznají podle označení epizody v názvu souboru (např. „Přátelé S01E02“ nebo „Přátelé 1x02“) nebo podle složky sezóny („Přátelé\\Sezóna 1\\02.mkv“, také „Season 1“, „Série 1“, „S01“).'),
@@ -753,7 +774,7 @@ function renderGrid() {
   }
   if (!found.length) {
     grid.innerHTML = emptyState(ICONS.search, t('Nic nenalezeno'),
-      shows ? t('Žádný seriál neodpovídá zvoleným filtrům.') : t('Žádný film neodpovídá zvoleným filtrům.'),
+      state.view === 'anime' ? t('Žádný titul neodpovídá zvoleným filtrům.') : shows ? t('Žádný seriál neodpovídá zvoleným filtrům.') : t('Žádný film neodpovídá zvoleným filtrům.'),
       `<button class="btn" data-act="clear-filters">${t('Zrušit filtry')}</button>`);
     return;
   }
@@ -1357,10 +1378,10 @@ function episodeRow(e) {
 
 function renderDetail() {
   const drawer = $('#drawer');
-  const m = state.view === 'movies' ? movieById(state.detailId) : null;
+  const m = state.view !== 'shows' ? movieById(state.detailId) : null;
   if (!m) {
     drawer.classList.add('hidden');
-    if (state.view === 'movies') state.detailId = null;
+    if (state.view !== 'shows') state.detailId = null;
     return;
   }
 
@@ -1643,12 +1664,15 @@ async function openSettings() {
             <div class="p">${esc(l.path)}
               <small class="${l.online ? '' : 'off'}">${l.online ? `${l.count} ${plural(l.count, 'video', 'videa', 'videí')}` : t('Nedostupná – disk není připojený nebo se složka přesunula')}</small>
             </div>
+            <label class="lib-anime" title="${t('Filmy a seriály z této složky budou v záložce Anime.')}"><input type="checkbox" data-anime-lib="${l.id}" ${l.anime ? 'checked' : ''} /> ${t('Anime')}</label>
             <button class="btn small" data-act="relocate" data-id="${l.id}">${t('Změnit umístění…')}</button>
             <button class="btn small" data-act="remove" data-id="${l.id}">${t('Odebrat')}</button>
           </div>`).join('') : `<div class="value">${t('Zatím žádné složky.')}</div>`}
         <div class="row" style="margin-top:10px">
           <button class="btn small primary" data-act="add-library">+ ${t('Přidat složku')}</button>
+          <button class="btn small" data-act="add-anime-library">+ ${t('Přidat složku s anime')}</button>
         </div>
+        <div class="muted" style="margin-top:8px">${t('Anime se bere jen ze složek označených jako Anime. Mají vlastní záložku a ve Filmech a Seriálech se neukazují.')}</div>
         <label class="check-row"><input type="checkbox" data-opt="watchFolders" ${s.watchFolders ? 'checked' : ''} />
           <span>${t('Hlídat složky')}<small>${t('Nové, přesunuté a smazané soubory se projeví samy, stejně jako připojení nebo odpojení disku.')}</small></span></label>
         <div class="muted" style="margin-top:10px">${android
@@ -1781,6 +1805,11 @@ async function openSettings() {
       return;
     }
     if (await onTrackRulesChange(e, draw)) return;
+    if (e.target.dataset.animeLib) {
+      const data = await call('set_library_anime', { id: +e.target.dataset.animeLib, anime: e.target.checked });
+      if (data) applyData(data);
+      return;
+    }
     if (!e.target.dataset.opt) return;
     const opts = {};
     for (const box of el.querySelectorAll('[data-opt]')) opts[box.dataset.opt] = box.checked;
@@ -1800,7 +1829,8 @@ async function openSettings() {
     if (await onTrackRulesClick(btn, draw)) return;
     if (await onBackupClick(btn, draw)) return;
     if (act === 'close') close();
-    else if (act === 'add-library') addLibrary();
+    else if (act === 'add-library') addLibrary(false);
+    else if (act === 'add-anime-library') addLibrary(true);
     else if (act === 'relocate') relocateLibrary(id);
     else if (act === 'remove') {
       await removeLibrary(id);
@@ -2804,13 +2834,9 @@ function homeRowsHtml(withHead = true) {
 
 /** Opens the detail of a movie or the page of a show, switching the tab when needed. */
 function openItem(m) {
-  if (m.isShow) {
-    switchView('shows');
-    openShowPage(m.id);
-  } else {
-    switchView('movies');
-    openDetail(m.id);
-  }
+  switchView(isAnime(m) ? 'anime' : m.isShow ? 'shows' : 'movies');
+  if (m.isShow) openShowPage(m.id);
+  else openDetail(m.id);
 }
 
 /** Handles a click on a small card; true when it was one. */
@@ -2860,7 +2886,7 @@ function renderFocusChip() {
     return;
   }
   // The person may also be in the other tab.
-  const other = f.kind === 'person' ? (state.view === 'movies' ? showItems : movieItems).filter(matchesFocus).length : 0;
+  const other = f.kind === 'person' && state.view !== 'anime' ? itemsOf(state.view === 'movies' ? 'shows' : 'movies').filter(matchesFocus).length : 0;
   const otherNoun = state.view === 'movies' ? plural(other, 'seriál', 'seriály', 'seriálů') : plural(other, 'film', 'filmy', 'filmů');
   chip.innerHTML = `
     <span class="name">${f.kind === 'collection' ? t('Série') : t('Osoba')}: <b>${esc(f.name)}</b></span>
@@ -3231,13 +3257,15 @@ async function ensureStorage() {
   return !!(await call('storage_access', { request: true }));
 }
 
-async function addLibrary() {
-  const dir = await pickFolder(t('Vyberte složku s filmy'));
+/** Adds a folder; in the Anime tab (or with `anime`) a folder with anime. */
+async function addLibrary(anime = state.view === 'anime') {
+  const dir = await pickFolder(anime ? t('Vyberte složku s anime') : t('Vyberte složku s filmy'));
   if (!dir) return;
   const episodes = (list) => list.filter((m) => m.showId != null).length;
   const before = { movies: state.movies.length - episodes(state.movies), episodes: episodes(state.movies) };
-  const data = await withLoading(t('Prohledávám složku…'), () => call('add_library', { path: dir.path, label: dir.label ?? null }));
+  const data = await withLoading(t('Prohledávám složku…'), () => call('add_library', { path: dir.path, label: dir.label ?? null, anime }));
   if (!data) return;
+  if (anime) state.view = 'anime';
   applyData(data);
   const newEpisodes = episodes(data.movies) - before.episodes;
   const newMovies = data.movies.length - newEpisodes - before.episodes - before.movies;
@@ -3417,6 +3445,9 @@ function switchView(view) {
   }
   state.view = view;
   state.selection.clear();
+  state.detailId = null;
+  state.showId = null;
+  if (state.libraryFilter !== null && !librariesOf(view).some((l) => l.id === state.libraryFilter)) state.libraryFilter = null;
   lastClickedIndex = null;
   savePrefs();
   render();
@@ -3484,7 +3515,7 @@ let ignorePop = false;
 let syncPending = false;
 
 const layerOpen = () =>
-  TV.pickerOpen() || !!closeCurrentModal || state.filtersOpen || state.selection.size > 0 || !!openShow() || (state.view === 'movies' && state.detailId !== null);
+  TV.pickerOpen() || !!closeCurrentModal || state.filtersOpen || state.selection.size > 0 || !!openShow() || (state.view !== 'shows' && state.detailId !== null);
 
 /** Adds or removes the history entry; deferred so a dialog replacing another one counts as one. */
 function syncHistory() {
@@ -3537,8 +3568,8 @@ function clearSearch() {
 // ---------- events ----------
 
 function bindEvents() {
-  $('#btn-add-library').addEventListener('click', addLibrary);
-  $('#btn-add-library-2').addEventListener('click', addLibrary);
+  $('#btn-add-library').addEventListener('click', () => addLibrary());
+  $('#btn-add-library-2').addEventListener('click', () => addLibrary());
   $('#btn-rescan').addEventListener('click', rescan);
   $('#btn-settings').addEventListener('click', openSettings);
   $('#btn-stats').addEventListener('click', openStats);

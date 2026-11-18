@@ -470,7 +470,7 @@ mod tests {
 
         let mut db = Db::default();
         let lib = db.new_id();
-        db.libraries.push(LibraryDir { id: lib, path: root.to_string_lossy().into(), label: None });
+        db.libraries.push(LibraryDir { id: lib, path: root.to_string_lossy().into(), label: None, anime: false });
         let found = scan(&mut db);
         assert_eq!(found.len(), 2);
         let pelisky = *found.keys().find(|id| db.records[id].rel_path == "A/Pelisky.mkv").unwrap();

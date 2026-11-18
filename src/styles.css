@@ -538,6 +538,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .lib-row .p { flex: 1; min-width: 0; font-size: 13px; word-break: break-all; }
 .lib-row .p small { display: block; color: var(--text-3); }
 .lib-row .p small.off { color: #f87171; }
+.lib-anime { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
 
 /* ---------- movies / series tabs ---------- */
 .mode-tabs { display: flex; gap: 3px; padding: 3px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line); }
@@ -719,6 +720,9 @@ body.compact { --top: calc(56px + env(safe-area-inset-top, 0px)); }
 @media (max-width: 520px) {
   .compact #btn-about, .compact #btn-lang { display: none; }
   .compact .mode-tabs .n, .compact .mode-tabs svg { display: none; }
+  /* Three tabs (Anime too): the logo gives them its room. */
+  .compact.three-tabs .brand { display: none; }
+  .compact.three-tabs .mode-tabs button { padding: 0 2px; font-size: 13px; }
 }
 .compact .job:empty { display: none; }
 .compact .job {
