@@ -521,8 +521,25 @@ impl Db {
             })
             .map(|mut db| {
                 db.estimate_fetched();
+                db.recheck_unmatched();
                 db
             })
+    }
+
+    /// Versions before 1.8.3 searched TMDB only in the app's language and missed titles whose
+    /// Czech and original names differ from the file name (anime mostly). Titles without a
+    /// match are looked up once more; the next save marks the data with this version.
+    fn recheck_unmatched(&mut self) {
+        let older = crate::update::parse_version(&self.saved_by).is_none_or(|v| v < (1, 8, 3));
+        if !older {
+            return;
+        }
+        for record in self.records.values_mut().filter(|r| r.meta.is_none()) {
+            record.meta_checked = false;
+        }
+        for show in self.shows.values_mut().filter(|s| s.meta.is_none()) {
+            show.meta_checked = false;
+        }
     }
 
     /// Data from version 1.4 and older has no download time. The movie or show was added
@@ -764,6 +781,25 @@ mod tests {
         .unwrap();
         db.records.get_mut(&1).unwrap().manual_times = None;
         assert!(db.to_json().unwrap()["records"]["1"].get("manualTimes").is_none());
+    }
+
+    #[test]
+    fn titles_without_a_match_are_looked_up_again_once() {
+        let data = |saved_by: &str| serde_json::json!({
+            "version": VERSION, "savedBy": saved_by,
+            "records": {
+                "1": { "relPath": "a.mkv", "metaChecked": true },
+                "2": { "relPath": "b.mkv", "metaChecked": true, "meta": { "tmdbId": 5, "title": "B" } }
+            },
+            "shows": { "3": { "name": "Fire Force", "metaChecked": true } }
+        });
+        for old in ["", "1.8.2"] {
+            let db = Db::from_json(Ok(data(old))).unwrap();
+            assert!(!db.records[&1].meta_checked && !db.shows[&3].meta_checked, "{old}");
+            assert!(db.records[&2].meta_checked, "{old}");
+        }
+        let db = Db::from_json(Ok(data("1.8.3"))).unwrap();
+        assert!(db.records[&1].meta_checked && db.shows[&3].meta_checked);
     }
 
     #[test]

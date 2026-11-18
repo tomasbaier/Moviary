@@ -25,6 +25,7 @@ const SIMILAR_LIMIT: usize = 40;
 /// Suggestions kept per title; the ones in the library are left out when they are shown.
 const SUGGESTION_LIMIT: usize = 30;
 
+#[derive(Debug)]
 pub enum Error {
     /// Invalid key – no point in continuing.
     Auth(String),
@@ -143,12 +144,13 @@ impl Client {
 
     /// Searches movies, or TV series when `tv` is set; titles in the app's language.
     pub fn search(&self, query: &str, year: Option<u32>, tv: bool) -> Result<Vec<Candidate>, Error> {
+        self.search_in(query, year, tv, if crate::i18n::english() { ENGLISH } else { LANGUAGE })
+    }
+
+    /// Searches with titles in the given language.
+    fn search_in(&self, query: &str, year: Option<u32>, tv: bool, language: &str) -> Result<Vec<Candidate>, Error> {
         let year = year.map(|y| y.to_string());
-        let mut params = vec![
-            ("query", query),
-            ("language", if crate::i18n::english() { ENGLISH } else { LANGUAGE }),
-            ("include_adult", "false"),
-        ];
+        let mut params = vec![("query", query), ("language", language), ("include_adult", "false")];
         if let Some(year) = &year {
             params.push((if tv { "first_air_date_year" } else { "year" }, year));
         }
@@ -161,11 +163,8 @@ impl Client {
 
     /// TMDB id of the most likely match for a title parsed from a file name.
     pub fn find(&self, title: &str, year: Option<u32>, tv: bool) -> Result<Option<u64>, Error> {
-        let mut candidates = self.search(title, year, tv)?;
-        if candidates.is_empty() && year.is_some() {
-            candidates = self.search(title, None, tv)?;
-        }
-        Ok(best_match(&candidates, title, year).map(|c| c.id))
+        let language = if crate::i18n::english() { ENGLISH } else { LANGUAGE };
+        find_in(title, year, language, |year, language| self.search_in(title, year, tv, language))
     }
 
     /// Titles TMDB recommends for a movie or series, in the language of the app.
@@ -635,12 +634,47 @@ fn similarity(a: &str, b: &str) -> f64 {
     common as f64 / a.len().max(b.len()) as f64
 }
 
-/// Picks the candidate whose title is similar enough; a wrong match is worse than none.
-pub fn best_match<'a>(
-    candidates: &'a [Candidate],
+/// [`Client::find`] with the search given. Results come in the app's language first; when
+/// none of them has the title exactly, the search is repeated in English and the better
+/// match wins: a file named "Fire Force" does not resemble the Czech "Plamenná jednotka" nor
+/// the original "炎炎ノ消防隊", only the English name (and half of "Life Force").
+fn find_in(
     title: &str,
     year: Option<u32>,
-) -> Option<&'a Candidate> {
+    language: &str,
+    mut search: impl FnMut(Option<u32>, &str) -> Result<Vec<Candidate>, Error>,
+) -> Result<Option<u64>, Error> {
+    let languages = if language == ENGLISH { vec![ENGLISH] } else { vec![language, ENGLISH] };
+    let mut best: Option<Scored> = None;
+    for language in languages {
+        let mut candidates = search(year, language)?;
+        if candidates.is_empty() && year.is_some() {
+            candidates = search(None, language)?;
+        }
+        if candidates.is_empty() {
+            // TMDB matches titles in all languages, another language finds nothing either.
+            break;
+        }
+        if let Some(found) = scored_match(&candidates, title, year) {
+            if best.as_ref().is_none_or(|b| found.score > b.score) {
+                best = Some(found);
+            }
+        }
+        if best.as_ref().is_some_and(|b| b.similarity >= 1.0) {
+            break;
+        }
+    }
+    Ok(best.map(|b| b.id))
+}
+
+struct Scored {
+    id: u64,
+    similarity: f64,
+    score: f64,
+}
+
+/// Picks the candidate whose title is similar enough; a wrong match is worse than none.
+fn scored_match(candidates: &[Candidate], title: &str, year: Option<u32>) -> Option<Scored> {
     candidates
         .iter()
         .enumerate()
@@ -663,10 +697,9 @@ pub fn best_match<'a>(
                 _ => 0.0,
             };
             // TMDB orders by relevance, prefer earlier results on a tie.
-            Some((sim + bonus - rank as f64 * 0.01, c))
+            Some(Scored { id: c.id, similarity: sim, score: sim + bonus - rank as f64 * 0.01 })
         })
-        .max_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, c)| c)
+        .max_by(|a, b| a.score.total_cmp(&b.score))
 }
 
 #[cfg(test)]
@@ -750,13 +783,57 @@ mod tests {
             c(1, "Harry Potter a Kámen mudrců", "Harry Potter and the Philosopher's Stone", 2001),
             c(2, "Harry Potter a Tajemná komnata", "Harry Potter and the Chamber of Secrets", 2002),
         ];
-        assert_eq!(best_match(&hp, "Harry Potter And The Sorcerers Stone", Some(2001)).unwrap().id, 1);
+        assert_eq!(scored_match(&hp, "Harry Potter And The Sorcerers Stone", Some(2001)).unwrap().id, 1);
 
         let matrix = [c(5, "Matrix Reloaded", "The Matrix Reloaded", 2003), c(6, "Matrix", "The Matrix", 1999)];
-        assert_eq!(best_match(&matrix, "Matrix", Some(1999)).unwrap().id, 6);
-        assert_eq!(best_match(&matrix, "The Matrix", None).unwrap().id, 6);
+        assert_eq!(scored_match(&matrix, "Matrix", Some(1999)).unwrap().id, 6);
+        assert_eq!(scored_match(&matrix, "The Matrix", None).unwrap().id, 6);
 
         let random = [c(9, "Úplně jiný film", "Something Else", 2024)];
-        assert!(best_match(&random, "AFK Journey", Some(2024)).is_none());
+        assert!(scored_match(&random, "AFK Journey", Some(2024)).is_none());
+    }
+
+    #[test]
+    fn finds_by_the_english_title_when_the_czech_one_differs() {
+        let fire_force = |language: &str| {
+            let name = if language == ENGLISH { "Fire Force" } else { "Plamenná jednotka" };
+            vec![c(88046, name, "炎炎ノ消防隊", 2019), c(7, "Life Force", "Life Force", 2000)]
+        };
+        let mut asked = Vec::new();
+        let found = find_in("Fire Force", None, LANGUAGE, |year, language| {
+            asked.push((year, language.to_string()));
+            Ok(fire_force(language))
+        });
+        assert_eq!(found.unwrap(), Some(88046));
+        assert_eq!(asked, [(None, LANGUAGE.to_string()), (None, ENGLISH.to_string())]);
+
+        // A Czech match needs no second search.
+        let mut searches = 0;
+        let found = find_in("Plamenná jednotka", Some(2019), LANGUAGE, |_, language| {
+            searches += 1;
+            Ok(fire_force(language))
+        });
+        assert_eq!((found.unwrap(), searches), (Some(88046), 1));
+
+        // A partial Czech match ("Life Force") loses to the exact English one.
+        let found = find_in("Fire Force", None, LANGUAGE, |_, language| {
+            Ok(if language == ENGLISH { fire_force(language) } else { fire_force(language)[1..].to_vec() })
+        });
+        assert_eq!(found.unwrap(), Some(88046));
+        // ...but stays when English has nothing better.
+        let found = find_in("Fire Force", None, LANGUAGE, |_, language| Ok(fire_force(language)[1..].to_vec()));
+        assert_eq!(found.unwrap(), Some(7));
+
+        // Nothing found at all: no search in English.
+        let mut searches = 0;
+        let found = find_in("Nic takového", Some(2019), LANGUAGE, |_, _| {
+            searches += 1;
+            Ok(Vec::new())
+        });
+        assert_eq!((found.unwrap(), searches), (None, 2));
+
+        // Found, but nothing similar in either language.
+        let found = find_in("AFK Journey", None, ENGLISH, |_, language| Ok(fire_force(language)));
+        assert_eq!(found.unwrap(), None);
     }
 }
