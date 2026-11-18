@@ -294,6 +294,24 @@ pub fn season_folder(name: &str) -> Option<u32> {
     }
 }
 
+/// The name of a show from the folder of a season pack: "Fire Force S01", "Fire Force
+/// S01-S02" and "The Office Season 2" -> "Fire Force", "The Office".
+fn without_season(title: &str) -> String {
+    let tokens: Vec<&str> = title.split_whitespace().collect();
+    let digits = |t: &str| (1..=2).contains(&t.len()) && t.chars().all(|c| c.is_ascii_digit());
+    let season_code = |t: &str| {
+        let lower = t.to_lowercase();
+        lower.split('-').all(|part| part.strip_prefix('s').is_some_and(digits))
+    };
+    let season_word = |i: usize| {
+        SEASON_WORDS.contains(&tokens[i].to_lowercase().as_str()) && tokens.get(i + 1).is_some_and(|n| digits(n))
+    };
+    match (1..tokens.len()).find(|&i| season_code(tokens[i]) || season_word(i)) {
+        Some(i) => tokens[..i].join(" "),
+        None => title.to_string(),
+    }
+}
+
 /// Name used to group the episodes of one show: "The.Office.(US)" equals "the office us".
 pub fn show_key(name: &str) -> String {
     name.to_lowercase()
@@ -335,7 +353,8 @@ pub fn parse_episode(rel: &str) -> Option<EpisodeName> {
         .iter()
         .rev()
         .find(|d| season_folder(d).is_none())
-        .map(|d| parse_title(d));
+        .map(|d| parse_title(d))
+        .map(|(title, year)| (without_season(&title), year));
     let prefix: String = chars[..marker.start].iter().collect();
     let prefix = prefix.trim_matches(|c: char| c == '-' || c.is_whitespace());
     let (show, year) = match (prefix, folder) {
@@ -398,6 +417,20 @@ mod tests {
         );
         assert_eq!(parse_episode("Most!/2. řada/Díl 3.mp4"), ep("Most!", 2, 3, None));
         assert_eq!(parse_episode("Simpsonovi/Speciály/E01.mkv"), ep("Simpsonovi", 0, 1, None));
+        // Season packs: the season in the folder name is not part of the show's name.
+        let pack = "Fire Force S01-S02 1080p Dual Audio BDRip 10 bits DD x265-EMBER";
+        assert_eq!(
+            parse_episode(&format!("{pack}/Fire Force S01 1080p Dual Audio BDRip 10 bits DD x265-EMBER/S01E01-Shinra Kusakabe Enlists [12712E53].mkv")),
+            ep("Fire Force", 1, 1, Some("Shinra Kusakabe Enlists [12712E53]"))
+        );
+        assert_eq!(
+            parse_episode(&format!("{pack}/Fire Force S02 1080p Dual Audio BDRip 10 bits DD x265-EMBER/S02E01-A Fire Soldier’s Fight [E8184FD7].mkv")).map(|e| (e.show, e.season)),
+            Some(("Fire Force".into(), 2))
+        );
+        assert_eq!(parse_episode("The Office Season 2/S02E02 - Sexual Harassment.mkv").map(|e| e.show), Some("The Office".into()));
+        assert_eq!(parse_episode("Mash S01-S11/S05E01.mkv").map(|e| e.show), Some("Mash".into()));
+        // A name that only looks like one stays.
+        assert_eq!(parse_episode("S1m0ne Show/S01E01.mkv").map(|e| e.show), Some("S1m0ne Show".into()));
 
         let double = parse_episode("Lost.S01E01E02.Pilot.mkv").unwrap();
         assert_eq!((double.episode, double.last_episode), (1, Some(2)));
